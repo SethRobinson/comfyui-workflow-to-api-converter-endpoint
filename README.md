@@ -133,6 +133,16 @@ curl -s -X POST "http://localhost:8188/workflow/convert" \
 
 ## FAQ
 
+## Why is this needed?
+
+Ok, here's the deal, you export your workflow, and from your own custom app you call ComfyUI's prompt endpoint to execute it. Well, joke's on you because it gets an error.  Why?  You can't run workflows directly, you need to choose "Export (API)" which is an option you'll only see if you've enabled developer mode for some reason.
+
+So you think, cool, I'll just use that.  Well, it works, but later you decide you need to edit your workflow a bit and you drag and drop your "API" version into ComfyUI and low and behold, it's a skeleton of a real workflow, it's missing stuff!  You you better hope you saved a copy of the ORIGINAL full workflow.
+
+So this solution allows you to only work with "full workflows", you just have your app do the extra step of converting the workflow to an "API" version before using it.  In my app, I check filedates and cache it out.
+
+The result?  I no longer have to manually save two versions of my workflows to use with the API, just the "full".
+
 ## "Can the normal /prompt endpoint automatically convert workflow JSON files to API format and run them, so I don’t need to call the conversion endpoint?"
 
 Currrently no, but originally that's how I did it.  
