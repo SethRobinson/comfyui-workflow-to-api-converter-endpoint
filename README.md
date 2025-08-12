@@ -153,7 +153,7 @@ If you don't plan on editing the workflow at all, hmm, maybe it would still be u
 
 ## Why didn't you implement this as a custom node?
 
-Wish I could but as far as I know, you can't add an endpoint with a custom node.
+Wish I could but as far as I know, you can't add a general feature like a global endpoint with a custom node.  If there are hooks for an addon/utility that can actually do that, please let me know.
 
 ## Credits
 
