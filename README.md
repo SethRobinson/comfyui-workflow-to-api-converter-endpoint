@@ -149,7 +149,11 @@ Currrently no, but originally that's how I did it.
 
 But here's the problem with that:  Some vars don't exist in the pre-converted workflow json, so you can't edit them before sending them.  I realized that for my usage (dynamically changing prompts, seeds, etc on the fly before sending them to ComfyUI) it wouldn't work; I'd need to convert it, edit it, then send it for rendering.  
 
-If you don't plan on editing the workflow at all, hmm, maybe it would still be useful to add that back.
+If you don't plan on editing the workflow at all, hmm, maybe it would still be useful to add that back.  It's really easy, but you have to modify the original prompt workflow, just ask an AI to do it, it's dead simple.
+
+## Why didn't you implement this as a custom node?
+
+Wish I could but as far as I know, you can't add an endpoint with a custom node.
 
 ## Credits
 
