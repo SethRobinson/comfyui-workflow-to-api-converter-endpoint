@@ -23,9 +23,9 @@ For example, there is no protection against someone trying to upload a 10 GB fil
 
 ## One line install to an existing repo using AI 
 
-- In a terminal, move into your existing ComfyUI dir, open Claude or Cursor and type this as instructions to it:
+- In a terminal, move into your existing ComfyUI dir, open "claude" (Claude CLI) or Cursor and type this as instructions to it:
 ```
-I want to install this modification to my ComfyUI install. Go to https://raw.githubusercontent.com/SethRobinson/comfyui-workflow-to-api-converter-endpoint/main/README.md and follow the directions to install it.  Check the new code for anything dangerous (I don't know, backdoors or trojans, that kind of thing) and if it looks ok, go ahead and install it, following its directions.
+I want to install this modification to my ComfyUI install. Go to https://raw.githubusercontent.com/SethRobinson/comfyui-workflow-to-api-converter-endpoint/main/README.md and follow the directions to install it.  Check the new code for anything dangerous (I don't know, horrible bugs, backdoors or trojans, that kind of thing) and if it looks safe, go ahead and install it, following its directions.
 ```
 
 
