@@ -131,36 +131,6 @@ curl -s -X POST "http://localhost:8188/workflow/convert" \
   --data-binary @workflow.json > api_workflow.json
 ```
 
-- Convert and immediately execute (requires `jq`) (bash/zsh):
-
-```bash
-curl -s -X POST "http://localhost:8188/workflow/convert" \
-  -H "Content-Type: application/json" \
-  --data-binary @workflow.json \
-| jq -c '{prompt: .}' \
-| curl -s -X POST "http://localhost:8188/prompt" \
-    -H "Content-Type: application/json" \
-    --data-binary @-
-```
-
-- PowerShell equivalents (use the real `curl.exe`; second example also requires `jq`):
-
-```powershell
-# Save API format to file
-curl.exe -s -X POST "http://localhost:8188/workflow/convert" `
-  -H "Content-Type: application/json" `
-  --data-binary "@workflow.json" | Set-Content -Encoding utf8 "api_workflow.json"
-
-# Convert and immediately execute
-curl.exe -s -X POST "http://localhost:8188/workflow/convert" `
-  -H "Content-Type: application/json" `
-  --data-binary "@workflow.json" `
-| jq -c '{prompt: .}' `
-| curl.exe -s -X POST "http://localhost:8188/prompt" `
-    -H "Content-Type: application/json" `
-    --data-binary @-
-```
-
 ## FAQ
 
 ## "Can the normal /prompt endpoint automatically convert workflow JSON files to API format and run them, so I don’t need to call the conversion endpoint?"
