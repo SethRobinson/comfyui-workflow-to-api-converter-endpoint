@@ -1,9 +1,9 @@
-# ComfyUI Workflow Converter End Point
+# ComfyUI Workflow Converter Endpoint
 
 Version: 1.0
 
 ## Overview
-Adds a `/workflow/convert` endpoint to ComfyUI that converts non-API workflow formats to API format.  The "Save (API)" client-end Javascript logic has been converted to python so it can run server side.
+Adds a `/workflow/convert` endpoint to ComfyUI that converts non-API workflow formats to API format.  The "Save (API)" client-end Javascript logic has been converted to python so it can run server-side.
 
 ## Features
 - Converts non-API workflows to the exact format produced by ComfyUI's "Save (API)" function
@@ -17,9 +17,9 @@ Adds a `/workflow/convert` endpoint to ComfyUI that converts non-API workflow fo
 
 ## Disclaimer
 
-How robust is this?  It handled all my workflows perfectly (even large 200 KB ones using Flux, Wan 2.2, etc) but your results may vary, no promises.  It has not been hardened or tested widely, so I don't recommend using this in any public facing way.  
+How robust is this?  It handled all my workflows perfectly (even large 200 KB ones using Flux, Wan 2.2, etc) but your results may vary, no promises.  It has not been hardened or tested widely, so I don't recommend using this in any public-facing way.  
 
-For example, there is no protection against someone trying to upload a 10 GB file, I don't know what would happen.  So I recommend only using this privately (same computer or private LAN) and for non-mission critical stuff.
+For example, there is no protection against someone trying to upload a 10 GB file, I don't know what would happen.  So I recommend only using this privately (same computer or private LAN) and for non-mission-critical stuff.
 
 -Seth
 
@@ -56,7 +56,7 @@ In `server.py`, find the routes section (search for `@routes.post("/queue")`) an
 ```python
         @routes.post("/workflow/convert")
         async def convert_workflow(request):
-            """Convert a non-API workflow to API format without executing it"""
+            """Convert a non-API workflow to the API format without executing it"""
             try:
                 json_data = await request.json()
                 
@@ -157,6 +157,15 @@ curl.exe -s -X POST "http://localhost:8188/workflow/convert" `
     --data-binary @-
 ```
 
+## FAQ
+
+## "Can the normal /prompt endpoint automatically convert workflow JSON files to API format and run them, so I don’t need to call the conversion endpoint?"
+
+Currrently no, but originally that's how I did it.  
+
+But here's the problem with that:  Some vars don't exist in the pre-converted workflow json, so you can't edit them before sending them.  I realized that for my usage (dynamically changing prompts, seeds, etc on the fly before sending them to ComfyUI) it wouldn't work; I'd need to convert it, edit it, then send it for rendering.  
+
+If you don't plan on editing the workflow at all, hmm, maybe it would still be useful to add that back.
 
 ## Credits
 
