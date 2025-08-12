@@ -452,9 +452,3 @@ class WorkflowConverter:
         
         # If we still can't determine mappings, return empty
         return []
-
-
-def save_json_with_encoding(data: Dict[str, Any], filepath: str, ensure_ascii: bool = False):
-    """Save JSON with proper Unicode handling"""
-    with open(filepath, 'w', encoding='utf-8') as f:
-        json.dump(data, f, indent=2, ensure_ascii=ensure_ascii)
