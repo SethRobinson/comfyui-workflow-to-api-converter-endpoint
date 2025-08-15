@@ -86,12 +86,15 @@ class WorkflowConverter:
             return workflow
         
         # Extract nodes and links
-        nodes = workflow.get('nodes', [])
+        workflow_nodes = workflow.get('nodes', [])
         links = workflow.get('links', [])
         
         # Build link map for quick lookup
         # link_id -> (source_node_id, source_slot, target_node_id, target_slot, type)
         link_map = {}
+        # Also track which nodes are connected to others (have outputs that go somewhere)
+        nodes_with_connected_outputs = set()
+        
         for link in links:
             if len(link) >= 6:
                 link_id = link[0]
@@ -107,20 +110,58 @@ class WorkflowConverter:
                     'target_slot': target_slot,
                     'type': link_type
                 }
+                # Track that this source node has connected outputs
+                nodes_with_connected_outputs.add(source_id)
         
         # First pass: identify PrimitiveNodes and their values
+        # Also identify nodes that should be excluded from API format
         primitive_values = {}
-        for node in nodes:
-            if node.get('type') == 'PrimitiveNode':
-                node_id = str(node.get('id'))
+        nodes_to_exclude = set()
+        
+        for node in workflow_nodes:
+            node_id = node.get('id')
+            node_type = node.get('type')
+            
+            # Track primitive nodes
+            if node_type == 'PrimitiveNode':
+                node_id_str = str(node_id)
                 widget_values = node.get('widgets_values')
                 if widget_values and len(widget_values) > 0:
-                    primitive_values[node_id] = widget_values[0]
+                    primitive_values[node_id_str] = widget_values[0]
+            
+            # Check if this node should be excluded from API format
+            # Exclude nodes that have no connected outputs (UI-only nodes)
+            outputs = node.get('outputs', [])
+            has_connected_output = False
+            for output in outputs:
+                output_links = output.get('links', [])
+                if output_links and len(output_links) > 0:
+                    has_connected_output = True
+                    break
+            
+            # Check if this is a special UI-only node type that should be excluded
+            # LoadImageOutput is a special case - it's for loading from the output folder
+            # which is a UI convenience that shouldn't be in the API format
+            if node_type == 'LoadImageOutput':
+                nodes_to_exclude.add(node_id)
+                logger.debug(f"Marking node {node_id} ({node_type}) for exclusion - UI-only node type")
+            # If node has no outputs or no connected outputs, it should be excluded
+            # unless it's an OUTPUT_NODE (like SaveImage, PreviewImage)
+            elif not outputs or not has_connected_output:
+                # Check if this is an OUTPUT_NODE that should be kept
+                node_class = nodes.NODE_CLASS_MAPPINGS.get(node_type) if hasattr(nodes, 'NODE_CLASS_MAPPINGS') else None
+                is_output_node = node_class and hasattr(node_class, 'OUTPUT_NODE') and node_class.OUTPUT_NODE
+                
+                if not is_output_node:
+                    nodes_to_exclude.add(node_id)
+                    logger.debug(f"Marking node {node_id} ({node_type}) for exclusion - no connected outputs")
+                else:
+                    logger.debug(f"Keeping node {node_id} ({node_type}) - OUTPUT_NODE=True despite no connected outputs")
         
         # Build API format prompt
         api_prompt = {}
         
-        for node in nodes:
+        for node in workflow_nodes:
             node_id = str(node.get('id'))
             node_type = node.get('type')
             
@@ -131,10 +172,15 @@ class WorkflowConverter:
             if node.get('mode', 0) == 2:  # Mode 2 is muted
                 continue
             
-            # Skip non-executable nodes (like Note nodes and PrimitiveNodes)
-            # These are UI-only nodes that don't need to be in the API format
+            # Skip non-executable nodes
+            # These include UI-only nodes and nodes with no connected outputs
             if node_type in ['Note', 'PrimitiveNode']:
-                logger.info(f"Skipping {node_type} node {node_id}")
+                logger.debug(f"Skipping {node_type} node {node_id}")
+                continue
+            
+            # Skip nodes that were identified as having no connected outputs
+            if node.get('id') in nodes_to_exclude:
+                logger.debug(f"Skipping {node_type} node {node_id} - no connected outputs")
                 continue
             
             # Build node entry
@@ -169,10 +215,13 @@ class WorkflowConverter:
                         source_node_id = str(link_data['source_id'])
                         source_slot = link_data['source_slot']
                         
-                        # Check if the source is a PrimitiveNode
+                        # Check if the source is a PrimitiveNode or excluded node
                         if source_node_id in primitive_values:
                             # This is a resolved primitive value - treat as widget for ordering
                             primitive_inputs[input_name] = primitive_values[source_node_id]
+                        elif link_data['source_id'] in nodes_to_exclude:
+                            # Source node is excluded, skip this input connection
+                            logger.debug(f"Skipping input {input_name} from excluded node {source_node_id}")
                         else:
                             # Keep as link
                             link_inputs[input_name] = [source_node_id, source_slot]
