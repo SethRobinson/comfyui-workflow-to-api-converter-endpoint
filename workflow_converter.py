@@ -117,10 +117,17 @@ class WorkflowConverter:
         # Also identify nodes that should be excluded from API format
         primitive_values = {}
         nodes_to_exclude = set()
+        bypassed_nodes = set()  # Track bypassed/disabled nodes
         
         for node in workflow_nodes:
             node_id = node.get('id')
             node_type = node.get('type')
+            node_mode = node.get('mode', 0)
+            
+            # Track bypassed/disabled nodes
+            if node_mode == 4:
+                bypassed_nodes.add(node_id)
+                logger.debug(f"Tracking bypassed node {node_id} ({node_type})")
             
             # Track primitive nodes
             if node_type == 'PrimitiveNode':
@@ -158,6 +165,47 @@ class WorkflowConverter:
                 else:
                     logger.debug(f"Keeping node {node_id} ({node_type}) - OUTPUT_NODE=True despite no connected outputs")
         
+        # Helper function to trace through bypassed nodes
+        def trace_through_bypassed(source_node_id, source_slot, visited=None):
+            """
+            Trace through bypassed nodes to find the actual source.
+            Returns (actual_source_id, actual_source_slot) tuple.
+            """
+            if visited is None:
+                visited = set()
+            
+            # Avoid infinite loops
+            if source_node_id in visited:
+                return (source_node_id, source_slot)
+            visited.add(source_node_id)
+            
+            # If source is not bypassed, return it as-is
+            if source_node_id not in bypassed_nodes:
+                return (source_node_id, source_slot)
+            
+            # Find the input to this bypassed node
+            for node in workflow_nodes:
+                if node.get('id') == source_node_id:
+                    # Look for the input that should be passed through
+                    node_inputs = node.get('inputs', [])
+                    if node_inputs:
+                        # For bypassed nodes, we typically pass through the first image/latent input
+                        # This matches ComfyUI's bypass behavior
+                        for input_info in node_inputs:
+                            input_link = input_info.get('link')
+                            if input_link is not None and input_link in link_map:
+                                link_data = link_map[input_link]
+                                # Recursively trace through this source
+                                return trace_through_bypassed(
+                                    link_data['source_id'], 
+                                    link_data['source_slot'],
+                                    visited
+                                )
+                    break
+            
+            # If we couldn't trace further, return original
+            return (source_node_id, source_slot)
+        
         # Build API format prompt
         api_prompt = {}
         
@@ -168,8 +216,13 @@ class WorkflowConverter:
             if not node_type:
                 continue
                 
-            # Skip muted nodes
-            if node.get('mode', 0) == 2:  # Mode 2 is muted
+            # Skip muted and bypassed/disabled nodes
+            node_mode = node.get('mode', 0)
+            if node_mode == 2:  # Mode 2 is muted
+                logger.debug(f"Skipping muted node {node_id} ({node_type})")
+                continue
+            elif node_mode == 4:  # Mode 4 is bypassed/disabled
+                logger.debug(f"Skipping bypassed/disabled node {node_id} ({node_type})")
                 continue
             
             # Skip non-executable nodes
@@ -212,19 +265,25 @@ class WorkflowConverter:
                     if input_link is not None and input_link in link_map:
                         # This input is connected via a link
                         link_data = link_map[input_link]
-                        source_node_id = str(link_data['source_id'])
+                        source_node_id = link_data['source_id']
                         source_slot = link_data['source_slot']
                         
+                        # Trace through bypassed nodes to find the actual source
+                        actual_source_id, actual_source_slot = trace_through_bypassed(source_node_id, source_slot)
+                        source_node_id_str = str(actual_source_id)
+                        
                         # Check if the source is a PrimitiveNode or excluded node
-                        if source_node_id in primitive_values:
+                        if source_node_id_str in primitive_values:
                             # This is a resolved primitive value - treat as widget for ordering
-                            primitive_inputs[input_name] = primitive_values[source_node_id]
-                        elif link_data['source_id'] in nodes_to_exclude:
+                            primitive_inputs[input_name] = primitive_values[source_node_id_str]
+                        elif actual_source_id in nodes_to_exclude:
                             # Source node is excluded, skip this input connection
-                            logger.debug(f"Skipping input {input_name} from excluded node {source_node_id}")
+                            logger.debug(f"Skipping input {input_name} from excluded node {source_node_id_str}")
                         else:
-                            # Keep as link
-                            link_inputs[input_name] = [source_node_id, source_slot]
+                            # Keep as link with the actual source (bypassing any disabled nodes)
+                            if actual_source_id != source_node_id:
+                                logger.debug(f"Bypassing disabled node {source_node_id}, connecting {input_name} to {actual_source_id} instead")
+                            link_inputs[input_name] = [source_node_id_str, actual_source_slot]
             
             # Get the correct input order from the node class
             ordered_inputs = WorkflowConverter._get_ordered_inputs(node_type, node)

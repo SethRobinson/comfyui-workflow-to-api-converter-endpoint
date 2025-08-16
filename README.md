@@ -1,6 +1,6 @@
 # ComfyUI Workflow Converter Endpoint
 
-Version: 1.1
+Version: 1.2
 
 ## Overview
 Adds a `/workflow/convert` endpoint to ComfyUI that converts non-API workflow formats to API format.  The "Save (API)" client-end Javascript logic has been converted to python so it can run server-side.
