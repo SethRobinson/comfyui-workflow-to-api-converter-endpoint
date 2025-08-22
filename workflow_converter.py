@@ -306,24 +306,33 @@ class WorkflowConverter:
                             
                 elif isinstance(widget_values, list):
                     # List of values - need to map to widget names
-                    widget_mappings = WorkflowConverter._get_widget_mappings(node_type, node)
+                    # First check if widget values contain dictionaries with self-describing names
+                    has_dict_widgets = any(isinstance(v, dict) for v in widget_values)
                     
-                    # Special handling for control_after_generate values
-                    filtered_values = WorkflowConverter._filter_control_values(widget_values)
-                    
-                    # Map values to widget names
-                    if widget_mappings:
-                        for i, value in enumerate(filtered_values):
-                            if i < len(widget_mappings):
-                                widget_name = widget_mappings[i]
-                                # Only add if we have a valid name and it's not connected via link
-                                if widget_name and widget_name not in link_inputs:
-                                    widget_inputs[widget_name] = value
+                    if has_dict_widgets:
+                        # Handle widget values that are dictionaries
+                        # These often self-describe their input names
+                        WorkflowConverter._process_dict_widget_values(widget_values, widget_inputs, link_inputs)
                     else:
-                        # If we couldn't determine mappings for an unknown node,
-                        # we'll have to skip the widget values
-                        if filtered_values:
-                            logger.warning(f"Could not map widget values for unknown node type '{node_type}' (node {node_id})")
+                        # Regular widget values - need to map to widget names
+                        widget_mappings = WorkflowConverter._get_widget_mappings(node_type, node)
+                        
+                        # Special handling for control_after_generate values
+                        filtered_values = WorkflowConverter._filter_control_values(widget_values)
+                        
+                        # Map values to widget names
+                        if widget_mappings:
+                            for i, value in enumerate(filtered_values):
+                                if i < len(widget_mappings):
+                                    widget_name = widget_mappings[i]
+                                    # Only add if we have a valid name and it's not connected via link
+                                    if widget_name and widget_name not in link_inputs:
+                                        widget_inputs[widget_name] = value
+                        else:
+                            # If we couldn't determine mappings for an unknown node,
+                            # we'll have to skip the widget values
+                            if filtered_values:
+                                logger.warning(f"Could not map widget values for unknown node type '{node_type}' (node {node_id})")
             
             # Build inputs in the correct order
             # The official "Save (API)" format follows this pattern:
@@ -367,6 +376,44 @@ class WorkflowConverter:
             api_prompt[node_id] = api_node
         
         return api_prompt
+    
+    @staticmethod
+    def _process_dict_widget_values(widget_values: List[Any], widget_inputs: Dict[str, Any], link_inputs: Dict[str, Any]) -> None:
+        """
+        Process widget values that contain dictionaries.
+        These are self-describing widgets that contain their configuration as dicts.
+        """
+        lora_counter = 0
+        
+        for value in widget_values:
+            if isinstance(value, dict):
+                if not value:
+                    # Empty dict - skip
+                    continue
+                elif 'type' in value:
+                    # Widget with a type field - use the type as the input name
+                    widget_name = value.get('type')
+                    if widget_name and widget_name not in link_inputs:
+                        widget_inputs[widget_name] = value
+                elif 'lora' in value:
+                    # This is a lora configuration entry
+                    lora_counter += 1
+                    widget_name = f'lora_{lora_counter}'
+                    if widget_name not in link_inputs:
+                        # Remove 'strengthTwo' if it's None (not used in API format)
+                        clean_value = {k: v for k, v in value.items() if k != 'strengthTwo' or v is not None}
+                        widget_inputs[widget_name] = clean_value
+                else:
+                    # Unknown dict structure - include it as-is with a generic name
+                    # This ensures we don't lose data even for unknown structures
+                    logger.debug(f"Unknown dict widget value structure: {value}")
+            elif isinstance(value, str):
+                # String values at the end often represent buttons or special controls
+                # The "➕ Add Lora" button is a common example
+                if value == '':
+                    # Empty string often represents the "Add" button
+                    widget_inputs['➕ Add Lora'] = value
+            # Skip None values and other types that don't map to widgets
     
     @staticmethod
     def _filter_control_values(widget_values: List[Any]) -> List[Any]:
