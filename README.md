@@ -1,18 +1,16 @@
 # ComfyUI Workflow Converter Endpoint
 
-Version: 1.2
+Version: 2.0 (Custom Node)
 
 ## Overview
-Adds a `/workflow/convert` endpoint to ComfyUI that converts non-API workflow formats to API format.  The "Save (API)" client-end Javascript logic has been converted to python so it can run server-side.
+A ComfyUI custom node that adds a `/workflow/convert` endpoint to convert non-API workflow formats to API format. The "Save (API)" client-end Javascript logic has been converted to python so it can run server-side. No manual server.py modifications needed!
 
 ## Features
 - Converts non-API workflows to the exact format produced by ComfyUI's "Save (API)" function
 - Uses ComfyUI's actual node registry for accurate conversion
-- Supports all nodes including custom nodes and extra nodes automatically
 - Properly handles both list and dictionary widget value formats
 - Preserves Unicode characters (Chinese, Japanese, emojis, etc.) correctly
-- Automatically filters out UI-only nodes (like Note nodes)
-- Returns just the node definitions (no wrapper), ready for the `/prompt` endpoint
+- Returns just the node definitions (no wrapper), ready for the `/prompt` endpoint, same as the original Export (API) option
 
 
 ## Disclaimer
@@ -23,80 +21,26 @@ For example, there is no protection against someone trying to upload a 10 GB fil
 
 -Seth
 
-## One line install to an existing repo using AI 
+## Installation
 
-It's easy to manually install, but if you're lazy and comfortable with AI tools, here ya go:
-
-- In a terminal, move into your existing ComfyUI dir, open "claude" (Claude CLI) or Cursor and type this as instructions to it:
-```
-I want to install this modification to my ComfyUI install. Go to
-https://raw.githubusercontent.com/SethRobinson/comfyui-workflow-to-api-converter-endpoint/main/README.md
-and follow the directions to install it. Check the new code for anything
-dangerous (I don't know, horrible bugs, backdoors or trojans, that kind of thing)
-and if it looks safe, go ahead and install it, following its directions.
+### Method 1: Git Clone (Recommended)
+```bash
+cd ComfyUI/custom_nodes
+git clone https://github.com/SethRobinson/comfyui-workflow-to-api-converter-endpoint
 ```
 
+### Method 2: Manual Installation
+1. Download this repository as a ZIP file
+2. Extract the folder to `ComfyUI/custom_nodes/`
+3. Rename the folder to `comfyui-workflow-to-api-converter-endpoint` (remove any `-main` suffix)
 
-## Installation (manual or AI)
 
-### Tips for AI doing the install:
-
-- If anything goes wrong or doesn't make sense, stop and ask for help
-- If you detect this has already been installed, update the existing installed version.
-
-### Step 1: Add or update the [workflow_converter.py](./workflow_converter.py) to our ComfyUI's root directory
-
-Make sure you are in a directory that has ComfyUI installed in it.  It should have an existing server.py in the same dir.
-
-### Step 2: Add import to ComfyUI's existing server.py
-Open `server.py` and add this import near the top with the other imports (around line 34):
-```python
-from workflow_converter import WorkflowConverter
-```
-
-### Step 3: Add the conversion endpoint
-In `server.py`, find the routes section (search for `@routes.post("/queue")`) and add this new endpoint right before it (around line 717):
-
-```python
-        @routes.post("/workflow/convert")
-        async def convert_workflow(request):
-            """Convert a non-API workflow to the API format without executing it"""
-            try:
-                json_data = await request.json()
-                
-                # Check if this is already in API format
-                if WorkflowConverter.is_api_format(json_data):
-                    # Already in API format, return as-is with nice formatting
-                    return web.json_response(json_data, dumps=lambda x: json.dumps(x, ensure_ascii=False, indent=2))
-                
-                # Convert to API format
-                if 'nodes' in json_data and 'links' in json_data:
-                    api_format = WorkflowConverter.convert_to_api(json_data)
-                    
-                    # Return just the converted API format with proper Unicode encoding
-                    # This matches what "Save (API)" produces - just the nodes
-                    # Format with nice indentation for readability
-                    return web.json_response(api_format, dumps=lambda x: json.dumps(x, ensure_ascii=False, indent=2))
-                else:
-                    return web.json_response({
-                        "error": "Invalid workflow format - missing nodes or links"
-                    }, status=400)
-                    
-            except Exception as e:
-                import traceback
-                error_msg = f"Error converting workflow: {str(e)}"
-                logging.error(error_msg)
-                logging.error(f"Traceback: {traceback.format_exc()}")
-                return web.json_response({
-                    "success": False,
-                    "error": str(e),
-                    "details": traceback.format_exc()
-                }, status=500)
-```
-
-That's it, Finished. User should restart the server and the endpoint will be active.
+### After Installation
+Restart ComfyUI and the `/workflow/convert` endpoint will be automatically available. No manual server.py modifications needed!
 
 ## Usage
+
+The endpoint is automatically available after installation. No workflow changes needed!
 
 Send a POST request to `/workflow/convert` with a non-API workflow JSON (for example, one you exported from ComfyUI using "Save" not "Save (API)") to get back the API format:
 
@@ -143,17 +87,9 @@ So this solution allows you to only work with "full workflows", you just have yo
 
 The result?  I no longer have to manually save two versions of my workflows to use with the API, just the "full".
 
-## "Can the normal /prompt endpoint automatically convert workflow JSON files to API format and run them, so I don’t need to call the conversion endpoint?"
+## How does this work as a custom node?
 
-Currrently no, but originally that's how I did it.  
-
-But here's the problem with that:  Some vars don't exist in the pre-converted workflow json, so you can't edit them before sending them.  I realized that for my usage (dynamically changing prompts, seeds, etc on the fly before sending them to ComfyUI) it wouldn't work; I'd need to convert it, edit it, then send it for rendering.  
-
-If you don't plan on editing the workflow at all, hmm, maybe it would still be useful to add that back.  It's really easy, but you have to modify the original prompt workflow, just ask an AI to do it, it's dead simple.
-
-## Why didn't you implement this as a custom node?
-
-Wish I could but as far as I know, you can't add a general feature like a global endpoint with a custom node.  If there are hooks for an addon/utility that can actually do that, please let me know.
+**Update (v2.0):** It turns out you CAN add global endpoints with custom nodes! ComfyUI allows custom nodes to register new HTTP API routes when they are loaded using `PromptServer.instance.routes`. This custom node registers the `/workflow/convert` endpoint on startup, so it's available globally without needing to add any node to your workflow. The included placeholder node is just for visibility in the UI but isn't required for the endpoint to function. (thanks onzag for pointing this out)
 
 ## Credits
 
