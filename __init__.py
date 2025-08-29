@@ -76,7 +76,7 @@ async def converter_info(request):
     """
     return web.json_response({
         'name': 'ComfyUI Workflow to API Converter',
-        'version': '1.0.0',
+        'version': '2.0.0',
         'description': 'Converts non-API workflow format to API format for execution',
         'usage': 'POST a workflow JSON to this endpoint to convert it to API format',
         'author': 'Seth A. Robinson',
