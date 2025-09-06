@@ -3,7 +3,7 @@
 Version: 2.0 (Custom Node)
 
 ## Overview
-A ComfyUI custom node that adds a `/workflow/convert` endpoint to convert non-API workflow formats to API format. The "Save (API)" client-end Javascript logic has been converted to python so it can run server-side. No manual server.py modifications needed!
+A ComfyUI custom node that adds a `/workflow/convert` endpoint to convert non-API workflow formats to API format. The "Save (API)" client-end Javascript logic has been converted to python so it can run server-side. 
 
 ## Features
 - Converts non-API workflows to the exact format produced by ComfyUI's "Save (API)" function
@@ -36,11 +36,11 @@ git clone https://github.com/SethRobinson/comfyui-workflow-to-api-converter-endp
 
 
 ### After Installation
-Restart ComfyUI and the `/workflow/convert` endpoint will be automatically available. No manual server.py modifications needed!
+Restart ComfyUI and the `/workflow/convert` endpoint will be automatically available.
 
 ## Usage
 
-The endpoint is automatically available after installation. No workflow changes needed!
+The endpoint is automatically available after installation. No workflow changes needed - this isn't a node you put in a workflow.
 
 Send a POST request to `/workflow/convert` with a non-API workflow JSON (for example, one you exported from ComfyUI using "Save" not "Save (API)") to get back the API format:
 
@@ -89,7 +89,7 @@ The result?  I no longer have to manually save two versions of my workflows to u
 
 ## How does this work as a custom node?
 
-**Update (v2.0):** It turns out you CAN add global endpoints with custom nodes! ComfyUI allows custom nodes to register new HTTP API routes when they are loaded using `PromptServer.instance.routes`. This custom node registers the `/workflow/convert` endpoint on startup, so it's available globally without needing to add any node to your workflow. The included placeholder node is just for visibility in the UI but isn't required for the endpoint to function. (thanks onzag for pointing this out)
+**Update (v2.0):** It turns out you CAN add global endpoints with custom nodes. ComfyUI allows custom nodes to register new HTTP API routes when they are loaded using `PromptServer.instance.routes`. This custom node registers the `/workflow/convert` endpoint on startup, so it's available globally without needing to add any node to your workflow. The included placeholder node is just for visibility in the UI but isn't required for the endpoint to function. (thanks onzag for pointing this out)
 
 ## Credits
 
