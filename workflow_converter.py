@@ -276,9 +276,9 @@ class WorkflowConverter:
                         if source_node_id_str in primitive_values:
                             # This is a resolved primitive value - treat as widget for ordering
                             primitive_inputs[input_name] = primitive_values[source_node_id_str]
-                        elif actual_source_id in nodes_to_exclude:
-                            # Source node is excluded, skip this input connection
-                            logger.debug(f"Skipping input {input_name} from excluded node {source_node_id_str}")
+                        elif actual_source_id in nodes_to_exclude or actual_source_id in bypassed_nodes:
+                            # Source node is excluded or bypassed, skip this input connection
+                            logger.debug(f"Skipping input {input_name} from excluded/bypassed node {source_node_id_str}")
                         else:
                             # Keep as link with the actual source (bypassing any disabled nodes)
                             if actual_source_id != source_node_id:
@@ -495,7 +495,7 @@ class WorkflowConverter:
         """
         Get widget name mappings for a given node type.
         Returns a list of widget names in the order they appear.
-        
+
         This is used to map the widget_values list to actual input names.
         """
         # Try to get widget order from node properties first
@@ -510,7 +510,7 @@ class WorkflowConverter:
             try:
                 input_def = node_info['input']
                 widget_names = []
-                
+
                 # Process required inputs first, then optional
                 for section in ['required', 'optional']:
                     if section in input_def:
@@ -522,14 +522,14 @@ class WorkflowConverter:
                                 if isinstance(input_type, list):
                                     # This is a combo box widget (list of choices)
                                     widget_names.append(input_name)
-                                elif input_type in ['INT', 'FLOAT', 'STRING', 'BOOLEAN']:
-                                    # Basic widget types
+                                elif input_type in ['INT', 'FLOAT', 'STRING', 'BOOLEAN', 'COMBO']:
+                                    # Basic widget types (COMBO is also a widget type, not a connection)
                                     widget_names.append(input_name)
                                 elif isinstance(input_type, str) and not input_type.isupper():
                                     # Custom widget types (lowercase)
                                     widget_names.append(input_name)
                                 # Skip connection types (MODEL, LATENT, CONDITIONING, etc.)
-                
+
                 if widget_names:
                     return widget_names
             except Exception as e:
@@ -540,10 +540,10 @@ class WorkflowConverter:
             try:
                 node_class = nodes.NODE_CLASS_MAPPINGS[node_type]
                 input_types = node_class.INPUT_TYPES()
-                
+
                 # Build ordered list of widget names (non-connection inputs)
                 widget_names = []
-                
+
                 # Process required inputs first, then optional
                 for section in ['required', 'optional']:
                     if section in input_types:
@@ -555,14 +555,14 @@ class WorkflowConverter:
                                 if isinstance(input_type, list):
                                     # This is a combo box widget (list of choices)
                                     widget_names.append(input_name)
-                                elif input_type in ['INT', 'FLOAT', 'STRING', 'BOOLEAN']:
-                                    # Basic widget types
+                                elif input_type in ['INT', 'FLOAT', 'STRING', 'BOOLEAN', 'COMBO']:
+                                    # Basic widget types (COMBO is also a widget type, not a connection)
                                     widget_names.append(input_name)
                                 elif isinstance(input_type, str) and not input_type.isupper():
                                     # Custom widget types (lowercase)
                                     widget_names.append(input_name)
                                 # Skip connection types (MODEL, LATENT, CONDITIONING, etc.)
-                
+
                 if widget_names:
                     return widget_names
             except Exception as e:
@@ -572,12 +572,25 @@ class WorkflowConverter:
         widget_values = node.get('widgets_values', [])
         if not isinstance(widget_values, list) or len(widget_values) == 0:
             return []
-        
+
+        # Try to get widget names from ue_properties.widget_ue_connectable
+        # This property lists all widgets that can be converted to connectable inputs
+        properties = node.get('properties', {})
+        ue_properties = properties.get('ue_properties', {})
+        widget_ue_connectable = ue_properties.get('widget_ue_connectable', {})
+
+        if widget_ue_connectable and isinstance(widget_ue_connectable, dict):
+            # Get the keys which are the widget names
+            # These are in dictionary order, which should match the widget_values order
+            widget_names = list(widget_ue_connectable.keys())
+            if widget_names and len(widget_names) >= len(widget_values):
+                return widget_names[:len(widget_values)]
+
         # Get all inputs from the node
         all_inputs = []
         connected_inputs = set()
         widget_flagged_inputs = []
-        
+
         for input_info in node.get('inputs', []):
             input_name = input_info.get('name')
             if input_name:
@@ -586,7 +599,7 @@ class WorkflowConverter:
                     connected_inputs.add(input_name)
                 if input_info.get('widget'):
                     widget_flagged_inputs.append(input_name)
-        
+
         # If we have widget-flagged inputs, start with those
         if widget_flagged_inputs:
             # But we might have more widget values than flagged inputs
@@ -594,16 +607,16 @@ class WorkflowConverter:
             if len(widget_values) > len(widget_flagged_inputs):
                 # We need to find the additional widget inputs
                 # They should be the non-connected inputs that aren't flagged
-                potential_widgets = [inp for inp in all_inputs 
+                potential_widgets = [inp for inp in all_inputs
                                    if inp not in connected_inputs and inp not in widget_flagged_inputs]
                 # Combine them in order
                 return widget_flagged_inputs + potential_widgets[:len(widget_values) - len(widget_flagged_inputs)]
             return widget_flagged_inputs
-        
+
         # No flagged widgets, try to guess based on which inputs aren't connected
         unconnected = [inp for inp in all_inputs if inp not in connected_inputs]
         if unconnected and len(unconnected) >= len(widget_values):
             return unconnected[:len(widget_values)]
-        
+
         # If we still can't determine mappings, return empty
         return []

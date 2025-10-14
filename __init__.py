@@ -39,8 +39,14 @@ async def convert_workflow_endpoint(request):
         
         # Convert to API format
         if 'nodes' in json_data and 'links' in json_data:
+            num_nodes = len(json_data.get('nodes', []))
+            num_links = len(json_data.get('links', []))
+
             api_format = WorkflowConverter.convert_to_api(json_data)
-            
+
+            num_converted = len(api_format)
+            logger.info(f"[Workflow to API Converter by Seth A. Robinson] Converted workflow: {num_nodes} nodes, {num_links} links -> {num_converted} API nodes")
+
             # Return just the converted API format with proper Unicode encoding
             # This matches what "Save (API)" produces - just the nodes
             # Format with nice indentation for readability
@@ -76,7 +82,7 @@ async def converter_info(request):
     """
     return web.json_response({
         'name': 'ComfyUI Workflow to API Converter',
-        'version': '2.0.0',
+        'version': '2.0.1',
         'description': 'Converts non-API workflow format to API format for execution',
         'usage': 'POST a workflow JSON to this endpoint to convert it to API format',
         'author': 'Seth A. Robinson',

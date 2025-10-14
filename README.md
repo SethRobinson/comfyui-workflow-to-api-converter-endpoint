@@ -1,6 +1,6 @@
 # ComfyUI Workflow Converter Endpoint
 
-Version: 2.0 (Custom Node)
+Version: 2.0.1 (Custom Node)
 
 ## Overview
 A ComfyUI custom node that adds a `/workflow/convert` endpoint to convert non-API workflow formats to API format. The "Save (API)" client-end Javascript logic has been converted to python so it can run server-side. 
@@ -90,6 +90,8 @@ The result?  I no longer have to manually save two versions of my workflows to u
 ## How does this work as a custom node?
 
 **Update (v2.0):** It turns out you CAN add global endpoints with custom nodes. ComfyUI allows custom nodes to register new HTTP API routes when they are loaded using `PromptServer.instance.routes`. This custom node registers the `/workflow/convert` endpoint on startup, so it's available globally without needing to add any node to your workflow. The included placeholder node is just for visibility in the UI but isn't required for the endpoint to function. (thanks onzag for pointing this out)
+
+**Update (V2.01):** Fixed a conversion bug with combo box types, noticed it when using the "Scale image to total pixels" node.  Also, it now logs a single line when doing a conversion, was totally silent before unless there was a problem.
 
 ## Credits
 
