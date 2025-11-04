@@ -1,7 +1,7 @@
 [project]
 name = "comfyui-workflow-to-api-converter-endpoint"
 description = "ComfyUI custom node that adds a /workflow/convert endpoint to convert non-API workflow formats to API format"
-version = "2.0.1"
+version = "2.0.2"
 license = "MIT"
 dependencies = []
 authors = [

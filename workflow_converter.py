@@ -48,7 +48,136 @@ def get_node_info_for_type(node_type: str) -> Dict[str, Any]:
 
 class WorkflowConverter:
     """Converts non-API workflow format to API prompt format"""
-    
+
+    @staticmethod
+    def is_subgraph_uuid(node_type: str) -> bool:
+        """
+        Check if a node type is a subgraph UUID.
+        Subgraphs are identified by UUID format (e.g., "b43bb7e6-178c-4f1a-b014-ac4d6a50fca2")
+        """
+        if not node_type or not isinstance(node_type, str):
+            return False
+        # UUIDs are 36 characters with dashes at positions 8, 13, 18, 23
+        if len(node_type) == 36 and node_type.count('-') == 4:
+            parts = node_type.split('-')
+            if len(parts) == 5 and all(len(p) in [8, 4, 4, 4, 12] for i, p in enumerate(parts) if i == 0 or i == 4 or len(p) == 4):
+                return True
+        return False
+
+    @staticmethod
+    def expand_subgraph(subgraph_node_id: int, subgraph_def: Dict[str, Any], workflow_links: List) -> Tuple[List[Dict], List]:
+        """
+        Expand a subgraph into individual nodes.
+
+        Args:
+            subgraph_node_id: The ID of the subgraph node in the main workflow
+            subgraph_def: The subgraph definition from definitions.subgraphs
+            workflow_links: The links from the main workflow
+
+        Returns:
+            Tuple of (expanded_nodes, expanded_links)
+        """
+        expanded_nodes = []
+        expanded_links = []
+
+        # Get subgraph internal nodes and links
+        internal_nodes = subgraph_def.get('nodes', [])
+        internal_links = subgraph_def.get('links', [])
+
+        # Build a mapping of internal link IDs to link data
+        internal_link_map = {}
+        for link in internal_links:
+            if isinstance(link, dict):
+                link_id = link.get('id')
+                internal_link_map[link_id] = link
+
+        # Build input/output mappings for the subgraph
+        # Inputs: map input slot index to (internal_node_id, internal_slot)
+        # Outputs: map (internal_node_id, internal_slot) to output slot index
+        subgraph_inputs = subgraph_def.get('inputs', [])
+        subgraph_outputs = subgraph_def.get('outputs', [])
+
+        input_slot_to_internal = {}  # slot_index -> (target_node_id, target_slot)
+        internal_to_output_slot = {}  # (source_node_id, source_slot) -> slot_index
+
+        # Map inputs from the inputNode (-10) to actual internal nodes
+        for idx, input_def in enumerate(subgraph_inputs):
+            # Find links from inputNode to internal nodes
+            input_link_ids = input_def.get('linkIds', [])
+            for link_id in input_link_ids:
+                if link_id in internal_link_map:
+                    link = internal_link_map[link_id]
+                    target_id = link.get('target_id')
+                    target_slot = link.get('target_slot')
+                    input_slot_to_internal[idx] = (target_id, target_slot)
+
+        # Map outputs from internal nodes to the outputNode (-20)
+        for idx, output_def in enumerate(subgraph_outputs):
+            # Find links from internal nodes to outputNode
+            output_link_ids = output_def.get('linkIds', [])
+            for link_id in output_link_ids:
+                if link_id in internal_link_map:
+                    link = internal_link_map[link_id]
+                    origin_id = link.get('origin_id')
+                    origin_slot = link.get('origin_slot')
+                    internal_to_output_slot[(origin_id, origin_slot)] = idx
+
+        # Create expanded nodes with prefixed IDs
+        for node in internal_nodes:
+            internal_id = node.get('id')
+            expanded_node = node.copy()
+            # Prefix the node ID with the subgraph node ID
+            expanded_node['id'] = f"{subgraph_node_id}:{internal_id}"
+
+            # Update the node's inputs to remove links from the inputNode (-10)
+            # These will be replaced by external connections
+            if 'inputs' in expanded_node:
+                updated_inputs = []
+                for input_info in expanded_node['inputs']:
+                    input_link = input_info.get('link')
+                    # Check if this link comes from the inputNode
+                    if input_link in internal_link_map:
+                        link_data = internal_link_map[input_link]
+                        if link_data.get('origin_id') == -10:
+                            # This input comes from the subgraph's inputNode
+                            # Remove the link - it will be replaced by an external connection
+                            input_copy = input_info.copy()
+                            input_copy['link'] = None
+                            updated_inputs.append(input_copy)
+                        else:
+                            # Internal connection, keep as-is
+                            updated_inputs.append(input_info)
+                    else:
+                        # No link or unknown link, keep as-is
+                        updated_inputs.append(input_info)
+                expanded_node['inputs'] = updated_inputs
+
+            expanded_nodes.append(expanded_node)
+
+        # Create expanded links
+        # First, handle internal links (between nodes inside the subgraph)
+        for link in internal_links:
+            if isinstance(link, dict):
+                origin_id = link.get('origin_id')
+                target_id = link.get('target_id')
+
+                # Skip links from/to input/output nodes (-10, -20)
+                if origin_id in [-10, -20] or target_id in [-10, -20]:
+                    continue
+
+                # Create new link with prefixed node IDs
+                expanded_link = [
+                    link.get('id'),  # link_id - we'll need to ensure these don't conflict
+                    f"{subgraph_node_id}:{origin_id}",  # source with prefix
+                    link.get('origin_slot'),
+                    f"{subgraph_node_id}:{target_id}",  # target with prefix
+                    link.get('target_slot'),
+                    link.get('type')
+                ]
+                expanded_links.append(expanded_link)
+
+        return expanded_nodes, expanded_links, input_slot_to_internal, internal_to_output_slot
+
     @staticmethod
     def is_api_format(workflow: Dict[str, Any]) -> bool:
         """
@@ -59,7 +188,7 @@ class WorkflowConverter:
         # Check for non-API format indicators
         if 'nodes' in workflow and 'links' in workflow:
             return False
-        
+
         # Check if it looks like API format
         # API format should have numeric string keys with class_type
         for key, value in workflow.items():
@@ -67,9 +196,9 @@ class WorkflowConverter:
                 continue
             if isinstance(value, dict) and 'class_type' in value:
                 return True
-        
+
         return False
-    
+
     @staticmethod
     def convert_to_api(workflow: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -88,7 +217,152 @@ class WorkflowConverter:
         # Extract nodes and links
         workflow_nodes = workflow.get('nodes', [])
         links = workflow.get('links', [])
-        
+
+        # Extract subgraph definitions
+        subgraph_defs = {}
+        definitions = workflow.get('definitions', {})
+        for subgraph in definitions.get('subgraphs', []):
+            subgraph_id = subgraph.get('id')
+            if subgraph_id:
+                subgraph_defs[subgraph_id] = subgraph
+
+        # Expand subgraphs into individual nodes
+        # We need to do this recursively to handle nested subgraphs
+        # Keep expanding until no more subgraphs are found
+        subgraph_input_mappings = {}  # subgraph_node_id -> {slot_idx: (internal_node_id, internal_slot)}
+        subgraph_output_mappings = {}  # subgraph_node_id -> {(internal_node_id, internal_slot): slot_idx}
+
+        max_iterations = 10  # Prevent infinite loops
+        iteration = 0
+
+        while iteration < max_iterations:
+            iteration += 1
+            expanded_nodes = []
+            found_subgraph = False
+
+            for node in workflow_nodes:
+                node_type = node.get('type')
+                node_id = node.get('id')
+
+                # Check if this is a subgraph node
+                if WorkflowConverter.is_subgraph_uuid(node_type) and node_type in subgraph_defs:
+                    found_subgraph = True
+                    logger.debug(f"Expanding subgraph node {node_id} (type: {node_type}) - iteration {iteration}")
+                    # Expand the subgraph
+                    subgraph_def = subgraph_defs[node_type]
+                    sg_nodes, sg_links, input_map, output_map = WorkflowConverter.expand_subgraph(
+                        node_id, subgraph_def, links
+                    )
+
+                    # Add expanded nodes to our list
+                    expanded_nodes.extend(sg_nodes)
+
+                    # Add internal links from the subgraph
+                    links.extend(sg_links)
+
+                    # Store input/output mappings for later link remapping
+                    # Use string representation of node_id for consistency
+                    subgraph_input_mappings[str(node_id)] = input_map
+                    subgraph_output_mappings[str(node_id)] = output_map
+                else:
+                    # Regular node, keep as-is
+                    expanded_nodes.append(node)
+
+            # Replace workflow_nodes with expanded version
+            workflow_nodes = expanded_nodes
+
+            # If we didn't find any subgraphs in this iteration, we're done
+            if not found_subgraph:
+                logger.debug(f"Subgraph expansion complete after {iteration} iteration(s)")
+                break
+
+        if iteration >= max_iterations:
+            logger.warning(f"Reached maximum subgraph expansion iterations ({max_iterations}). There may be circular subgraph references.")
+
+        # Helper function to recursively resolve subgraph outputs
+        def resolve_subgraph_output(node_id_str, slot):
+            """
+            Recursively resolve a subgraph output to the actual internal node.
+            Returns (resolved_node_id, resolved_slot)
+            """
+            if node_id_str in subgraph_output_mappings:
+                output_map = subgraph_output_mappings[node_id_str]
+                for (internal_node, internal_slot), out_slot in output_map.items():
+                    if out_slot == slot:
+                        # Found the internal node for this output
+                        # Construct the new node ID
+                        new_node_id = f"{node_id_str}:{internal_node}"
+                        # Recursively resolve in case this is also a subgraph
+                        return resolve_subgraph_output(new_node_id, internal_slot)
+            # Not a subgraph or not found in mappings, return as-is
+            return (node_id_str, slot)
+
+        # Helper function to recursively resolve subgraph inputs
+        def resolve_subgraph_input(node_id_str, slot):
+            """
+            Recursively resolve a subgraph input to the actual internal node.
+            Returns (resolved_node_id, resolved_slot)
+            """
+            if node_id_str in subgraph_input_mappings:
+                input_map = subgraph_input_mappings[node_id_str]
+                if slot in input_map:
+                    internal_node, internal_slot = input_map[slot]
+                    # Construct the new node ID
+                    new_node_id = f"{node_id_str}:{internal_node}"
+                    # Recursively resolve in case this is also a subgraph
+                    return resolve_subgraph_input(new_node_id, internal_slot)
+            # Not a subgraph or not found in mappings, return as-is
+            return (node_id_str, slot)
+
+        # Update links to handle subgraph inputs and outputs
+        # Also track which expanded node inputs need to be updated
+        node_input_updates = {}  # expanded_node_id -> {input_name: link_id}
+
+        updated_links = []
+        for link in links:
+            if len(link) >= 6:
+                link_id = link[0]
+                source_id = link[1]
+                source_slot = link[2]
+                target_id = link[3]
+                target_slot = link[4]
+                link_type = link[5] if len(link) > 5 else None
+
+                # Recursively resolve subgraph source
+                source_id_str = str(source_id)
+                source_id, source_slot = resolve_subgraph_output(source_id_str, source_slot)
+
+                # Recursively resolve subgraph target
+                target_id_str = str(target_id)
+                resolved_target_id, resolved_target_slot = resolve_subgraph_input(target_id_str, target_slot)
+
+                # Track node input updates if target was remapped
+                if resolved_target_id != target_id_str:
+                    if resolved_target_id not in node_input_updates:
+                        node_input_updates[resolved_target_id] = {}
+                    node_input_updates[resolved_target_id][resolved_target_slot] = link_id
+
+                target_id = resolved_target_id
+                target_slot = resolved_target_slot
+
+                updated_links.append([link_id, source_id, source_slot, target_id, target_slot, link_type])
+
+        # Replace links with updated version
+        links = updated_links
+
+        # Update the expanded nodes' inputs to reference the external link IDs
+        for node in workflow_nodes:
+            node_id_str = str(node.get('id'))
+            if node_id_str in node_input_updates and 'inputs' in node:
+                slot_to_link = node_input_updates[node_id_str]
+                inputs = node.get('inputs', [])
+
+                # Update the input at each slot to reference the external link ID
+                for i, input_info in enumerate(inputs):
+                    # The slot corresponds to the index in the inputs list
+                    if i in slot_to_link:
+                        input_info['link'] = slot_to_link[i]
+
         # Build link map for quick lookup
         # link_id -> (source_node_id, source_slot, target_node_id, target_slot, type)
         link_map = {}

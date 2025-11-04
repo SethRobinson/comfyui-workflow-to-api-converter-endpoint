@@ -12,6 +12,9 @@ from .workflow_converter import WorkflowConverter
 # Set up logging
 logger = logging.getLogger(__name__)
 
+# Module version
+__version__ = "2.0.2"
+
 # Import ComfyUI's PromptServer to register our endpoint
 try:
     from server import PromptServer
@@ -45,7 +48,7 @@ async def convert_workflow_endpoint(request):
             api_format = WorkflowConverter.convert_to_api(json_data)
 
             num_converted = len(api_format)
-            logger.info(f"[Workflow to API Converter by Seth A. Robinson] Converted workflow: {num_nodes} nodes, {num_links} links -> {num_converted} API nodes")
+            logger.info(f"[Workflow to API Converter v{__version__} by Seth A. Robinson] Converted workflow: {num_nodes} nodes, {num_links} links -> {num_converted} API nodes")
 
             # Return just the converted API format with proper Unicode encoding
             # This matches what "Save (API)" produces - just the nodes
@@ -82,8 +85,8 @@ async def converter_info(request):
     """
     return web.json_response({
         'name': 'ComfyUI Workflow to API Converter',
-        'version': '2.0.1',
-        'description': 'Converts non-API workflow format to API format for execution',
+        'version': __version__,
+        'description': 'Converts non-API workflow format to API format for execution (now with nested subgraph support)',
         'usage': 'POST a workflow JSON to this endpoint to convert it to API format',
         'author': 'Seth A. Robinson',
         'repository': 'https://github.com/SethRobinson/comfyui-workflow-to-api-converter-endpoint'
