@@ -399,8 +399,9 @@ class WorkflowConverter:
             node_mode = node.get('mode', 0)
             
             # Track bypassed/disabled nodes
+            # Store as string to match link_data['source_id'] type
             if node_mode == 4:
-                bypassed_nodes.add(node_id)
+                bypassed_nodes.add(str(node_id))
                 logger.debug(f"Tracking bypassed node {node_id} ({node_type})")
             
             # Track primitive nodes
@@ -424,7 +425,7 @@ class WorkflowConverter:
             # LoadImageOutput is a special case - it's for loading from the output folder
             # which is a UI convenience that shouldn't be in the API format
             if node_type == 'LoadImageOutput':
-                nodes_to_exclude.add(node_id)
+                nodes_to_exclude.add(str(node_id))
                 logger.debug(f"Marking node {node_id} ({node_type}) for exclusion - UI-only node type")
             # If node has no outputs or no connected outputs, it should be excluded
             # unless it's an OUTPUT_NODE (like SaveImage, PreviewImage)
@@ -434,7 +435,7 @@ class WorkflowConverter:
                 is_output_node = node_class and hasattr(node_class, 'OUTPUT_NODE') and node_class.OUTPUT_NODE
                 
                 if not is_output_node:
-                    nodes_to_exclude.add(node_id)
+                    nodes_to_exclude.add(str(node_id))
                     logger.debug(f"Marking node {node_id} ({node_type}) for exclusion - no connected outputs")
                 else:
                     logger.debug(f"Keeping node {node_id} ({node_type}) - OUTPUT_NODE=True despite no connected outputs")
@@ -444,6 +445,9 @@ class WorkflowConverter:
             """
             Trace through bypassed nodes to find the actual source.
             Returns (actual_source_id, actual_source_slot) tuple.
+
+            Now handles ALL input types (widgets, strings, etc), not just image/latent.
+            This fixes kjnodes (WidgetToString) and other widget-based bypassed nodes.
             """
             if visited is None:
                 visited = set()
@@ -459,22 +463,33 @@ class WorkflowConverter:
             
             # Find the input to this bypassed node
             for node in workflow_nodes:
-                if node.get('id') == source_node_id:
+                # Convert to string for comparison (source_node_id is string, node.get('id') is int)
+                if str(node.get('id')) == str(source_node_id):
+                    node_type = node.get('type', 'unknown')
                     # Look for the input that should be passed through
                     node_inputs = node.get('inputs', [])
+
                     if node_inputs:
-                        # For bypassed nodes, we typically pass through the first image/latent input
-                        # This matches ComfyUI's bypass behavior
-                        for input_info in node_inputs:
+                        # Pass through ANY linked input, not just image/latent
+                        # This is critical for kjnodes (WidgetToString) which use widget inputs
+                        # Try to find a linked input (any type)
+                        linked_input = None
+                        for idx, input_info in enumerate(node_inputs):
                             input_link = input_info.get('link')
+                            input_name = input_info.get('name', f'input_{idx}')
+
                             if input_link is not None and input_link in link_map:
-                                link_data = link_map[input_link]
-                                # Recursively trace through this source
-                                return trace_through_bypassed(
-                                    link_data['source_id'], 
-                                    link_data['source_slot'],
-                                    visited
-                                )
+                                linked_input = input_link
+                                break
+
+                        if linked_input is not None:
+                            link_data = link_map[linked_input]
+                            # Recursively trace through this source
+                            return trace_through_bypassed(
+                                link_data['source_id'],
+                                link_data['source_slot'],
+                                visited
+                            )
                     break
             
             # If we couldn't trace further, return original
@@ -506,7 +521,8 @@ class WorkflowConverter:
                 continue
             
             # Skip nodes that were identified as having no connected outputs
-            if node.get('id') in nodes_to_exclude:
+            # Use node_id (string) instead of node.get('id') (int) to match nodes_to_exclude type
+            if node_id in nodes_to_exclude:
                 logger.debug(f"Skipping {node_type} node {node_id} - no connected outputs")
                 continue
             
@@ -541,24 +557,36 @@ class WorkflowConverter:
                         link_data = link_map[input_link]
                         source_node_id = link_data['source_id']
                         source_slot = link_data['source_slot']
-                        
-                        # Trace through bypassed nodes to find the actual source
-                        actual_source_id, actual_source_slot = trace_through_bypassed(source_node_id, source_slot)
+
+                        # If source is bypassed, SKIP this connection entirely
+                        # Bypassed nodes are excluded from API format, so connections to them are invalid
+                        # The target node will fall back to using widget values
+                        if source_node_id in bypassed_nodes:
+                            continue  # Skip this connection, let widget value be used instead
+
+                        # No need to trace through - source is not bypassed
+                        actual_source_id = source_node_id
+                        actual_source_slot = source_slot
                         source_node_id_str = str(actual_source_id)
                         
                         # Check if the source is a PrimitiveNode or excluded node
                         if source_node_id_str in primitive_values:
                             # This is a resolved primitive value - treat as widget for ordering
                             primitive_inputs[input_name] = primitive_values[source_node_id_str]
-                        elif actual_source_id in nodes_to_exclude or actual_source_id in bypassed_nodes:
-                            # Source node is excluded or bypassed, skip this input connection
-                            logger.debug(f"Skipping input {input_name} from excluded/bypassed node {source_node_id_str}")
+                        elif actual_source_id in nodes_to_exclude:
+                            # Source node is excluded (not an executable node), skip this input connection
+                            logger.debug(f"Skipping input {input_name} from excluded node {source_node_id_str}")
+                        elif actual_source_id in bypassed_nodes:
+                            # If we still ended up with a bypassed node after tracing, it means
+                            # the trace failed (couldn't find a non-bypassed source). Skip this connection.
+                            logger.warning(f"Could not resolve bypassed node {source_node_id} for input {input_name}, skipping connection")
                         else:
-                            # Keep as link with the actual source (bypassing any disabled nodes)
+                            # Keep as link with the actual source (after bypassing any disabled nodes)
                             if actual_source_id != source_node_id:
-                                logger.debug(f"Bypassing disabled node {source_node_id}, connecting {input_name} to {actual_source_id} instead")
-                            link_inputs[input_name] = [source_node_id_str, actual_source_slot]
-            
+                                logger.info(f"Bypassed disabled node {source_node_id}, connecting {input_name} to {actual_source_id} (slot {actual_source_slot}) instead")
+                            # Use actual_source_id (the traced node) not source_node_id (the bypassed node)
+                            link_inputs[input_name] = [str(actual_source_id), actual_source_slot]
+
             # Get the correct input order from the node class
             ordered_inputs = WorkflowConverter._get_ordered_inputs(node_type, node)
             
