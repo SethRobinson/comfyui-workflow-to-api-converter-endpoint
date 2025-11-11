@@ -31,6 +31,7 @@ For example, there is no protection against someone trying to upload a 10 GB fil
 
 ## Version History
 
+V2.03 - Fixed conversion of bypassed kjnodes (WidgetToString, Number to Int, Text to Number) - no more "Exception when validating node" errors for bypassed nodes, target nodes now fall back to widget values when sources are bypassed (thanks to LORDofDOOM for PR #5)
 V2.02 - Fixed bug with subgraphs (thanks to v3i1y for reporting this bug), now also shows version # to the ComfyUI log when used
 
 ## Installation
