@@ -558,15 +558,24 @@ class WorkflowConverter:
                         source_node_id = link_data['source_id']
                         source_slot = link_data['source_slot']
 
-                        # If source is bypassed, SKIP this connection entirely
-                        # Bypassed nodes are excluded from API format, so connections to them are invalid
-                        # The target node will fall back to using widget values
+                        # If source is bypassed, try to trace through to find the actual upstream source
+                        # This handles passthrough nodes (e.g., ModelSamplingAuraFlow) where bypassing
+                        # should just pass the input through to the output
                         if source_node_id in bypassed_nodes:
-                            continue  # Skip this connection, let widget value be used instead
-
-                        # No need to trace through - source is not bypassed
-                        actual_source_id = source_node_id
-                        actual_source_slot = source_slot
+                            actual_source_id, actual_source_slot = trace_through_bypassed(
+                                source_node_id,
+                                source_slot
+                            )
+                            # If we couldn't find a valid upstream source (still bypassed or no linked input),
+                            # skip this connection and let the target node fall back to widget values
+                            if str(actual_source_id) in bypassed_nodes:
+                                logger.debug(f"Could not trace through bypassed node {source_node_id} for input {input_name}, falling back to widget value")
+                                continue
+                        else:
+                            # Source is not bypassed, use as-is
+                            actual_source_id = source_node_id
+                            actual_source_slot = source_slot
+                        
                         source_node_id_str = str(actual_source_id)
                         
                         # Check if the source is a PrimitiveNode or excluded node

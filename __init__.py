@@ -13,7 +13,7 @@ from .workflow_converter import WorkflowConverter
 logger = logging.getLogger(__name__)
 
 # Module version
-__version__ = "2.0.3"
+__version__ = "2.0.4"
 
 # Import ComfyUI's PromptServer to register our endpoint
 try:
