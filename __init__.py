@@ -117,6 +117,8 @@ class WorkflowToAPIConverterNode:
     CATEGORY = "api"
     OUTPUT_NODE = False
     
+    DESCRIPTION = "Marker node for ComfyUI Manager dependency detection. Adding this to your workflow helps others auto-install this custom node. The actual conversion uses the /workflow/convert API endpoint."
+    
     def get_info(self):
         """Returns information about the converter endpoint."""
         info = f"Workflow to API Converter v{__version__}\nEndpoint: /workflow/convert\nby Seth A. Robinson"
