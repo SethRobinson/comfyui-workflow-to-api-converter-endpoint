@@ -1,8 +1,8 @@
 [project]
 name = "comfyui-workflow-to-api-converter-endpoint"
 description = "ComfyUI custom node that adds a /workflow/convert endpoint to convert non-API workflow formats to API format"
-version = "2.0.4"
-license = "MIT"
+version = "2.0.5"
+license = "Unlicense"
 dependencies = []
 authors = [
     {name = "Seth A. Robinson", email = "seth@rtsoft.com"}
@@ -16,7 +16,7 @@ Issues = "https://github.com/SethRobinson/comfyui-workflow-to-api-converter-endp
 PublisherId = "sethrobinson"
 DisplayName = "Workflow to API Converter Endpoint"
 Icon = ""
-Description = "Adds a global /workflow/convert API endpoint to convert non-API workflow formats to API format for ComfyUI execution"
+Description = "Adds a /workflow/convert API endpoint to convert non-API workflow formats to API format. Includes a marker node for ComfyUI Manager workflow dependency detection."
 NodeNames = [
     "WorkflowToAPIConverter"
 ]

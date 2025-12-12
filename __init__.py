@@ -13,7 +13,7 @@ from .workflow_converter import WorkflowConverter
 logger = logging.getLogger(__name__)
 
 # Module version
-__version__ = "2.0.4"
+__version__ = "2.0.5"
 
 # Import ComfyUI's PromptServer to register our endpoint
 try:
@@ -92,34 +92,35 @@ async def converter_info(request):
         'repository': 'https://github.com/SethRobinson/comfyui-workflow-to-api-converter-endpoint'
     })
 
-# Define a minimal node class for ComfyUI compatibility
-# This node doesn't need to do anything since the main functionality is the API endpoint
+# Define a marker node class for ComfyUI Manager compatibility
+# Adding this node to a workflow helps ComfyUI Manager detect the dependency
 class WorkflowToAPIConverterNode:
     """
-    A placeholder node that enables the workflow-to-API converter endpoint.
-    The actual conversion happens via the API endpoint, not through this node.
+    A marker node that indicates this workflow uses the Workflow-to-API Converter endpoint.
+    
+    Adding this node to your workflow helps ComfyUI Manager detect the dependency,
+    so when someone imports your workflow, they'll be prompted to install this custom node.
+    
+    The actual conversion happens via the /workflow/convert API endpoint, not through this node.
+    This node is purely informational and does not affect workflow execution.
     """
     
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {},
-            "optional": {
-                "info": ("STRING", {
-                    "default": "This node enables the /workflow/convert endpoint. No workflow interaction needed.",
-                    "multiline": True
-                })
-            }
         }
     
-    RETURN_TYPES = ()
-    FUNCTION = "noop"
-    CATEGORY = "utils"
-    OUTPUT_NODE = True
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("info",)
+    FUNCTION = "get_info"
+    CATEGORY = "api"
+    OUTPUT_NODE = False
     
-    def noop(self, info=None):
-        """This node doesn't need to do anything - the API endpoint is already registered."""
-        return {}
+    def get_info(self):
+        """Returns information about the converter endpoint."""
+        info = f"Workflow to API Converter v{__version__}\nEndpoint: /workflow/convert\nby Seth A. Robinson"
+        return (info,)
 
 # Node class mappings for ComfyUI
 NODE_CLASS_MAPPINGS = {
@@ -128,7 +129,7 @@ NODE_CLASS_MAPPINGS = {
 
 # Display name mappings
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "WorkflowToAPIConverter": "Workflow to API Converter (Endpoint Enabled)"
+    "WorkflowToAPIConverter": "Workflow to API Converter (Marker)"
 }
 
 # Log that the endpoint has been registered

@@ -26,10 +26,12 @@ For example, there is no protection against someone trying to upload a 10 GB fil
 - Uses ComfyUI's actual node registry for accurate conversion
 - Properly handles list and dictionary widget, subgraphs (including nested), etc
 - Preserves Unicode characters (Chinese, Japanese, emojis, etc.) correctly
-- Returns something that is ready to send to the `/prompt` endpoint, same as the original Export (API) option would create
+- Returns something that is ready to send to the `/prompt` endpoint, same as the original Javascript based web Export (API) option would've created
 
 
 ## Version History
+
+**V2.05** - Added marker node for ComfyUI Manager workflow dependency detection
 
 **V2.04** - Fixed conversion of bypassed passthrough nodes for real
 
@@ -56,7 +58,9 @@ Restart ComfyUI and the `/workflow/convert` endpoint will be automatically avail
 
 ## Usage
 
-The endpoint is automatically available after installation. No workflow changes needed - this isn't a node you put in a workflow.
+The endpoint is automatically available after installation. No workflow changes needed.
+
+**Optional:** You can add the "Workflow to API Converter (Marker)" node to your workflow. This helps ComfyUI Manager detect the dependency when sharing workflows with others.
 
 Send a POST request to `/workflow/convert` with a non-API workflow JSON (for example, one you exported from ComfyUI using "Save" not "Save (API)") to get back the API format:
 
