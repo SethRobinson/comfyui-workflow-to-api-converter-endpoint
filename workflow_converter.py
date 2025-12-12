@@ -280,11 +280,16 @@ class WorkflowConverter:
             logger.warning(f"Reached maximum subgraph expansion iterations ({max_iterations}). There may be circular subgraph references.")
 
         # Helper function to recursively resolve subgraph outputs
-        def resolve_subgraph_output(node_id_str, slot):
+        def resolve_subgraph_output(node_id_str, slot, depth=0):
             """
             Recursively resolve a subgraph output to the actual internal node.
             Returns (resolved_node_id, resolved_slot)
             """
+            # Prevent excessive recursion (security hardening)
+            if depth > 100:
+                logger.warning(f"Max recursion depth reached resolving subgraph output for node {node_id_str}")
+                return (node_id_str, slot)
+            
             if node_id_str in subgraph_output_mappings:
                 output_map = subgraph_output_mappings[node_id_str]
                 for (internal_node, internal_slot), out_slot in output_map.items():
@@ -293,16 +298,21 @@ class WorkflowConverter:
                         # Construct the new node ID
                         new_node_id = f"{node_id_str}:{internal_node}"
                         # Recursively resolve in case this is also a subgraph
-                        return resolve_subgraph_output(new_node_id, internal_slot)
+                        return resolve_subgraph_output(new_node_id, internal_slot, depth + 1)
             # Not a subgraph or not found in mappings, return as-is
             return (node_id_str, slot)
 
         # Helper function to recursively resolve subgraph inputs
-        def resolve_subgraph_input(node_id_str, slot):
+        def resolve_subgraph_input(node_id_str, slot, depth=0):
             """
             Recursively resolve a subgraph input to the actual internal node.
             Returns (resolved_node_id, resolved_slot)
             """
+            # Prevent excessive recursion (security hardening)
+            if depth > 100:
+                logger.warning(f"Max recursion depth reached resolving subgraph input for node {node_id_str}")
+                return (node_id_str, slot)
+            
             if node_id_str in subgraph_input_mappings:
                 input_map = subgraph_input_mappings[node_id_str]
                 if slot in input_map:
@@ -310,7 +320,7 @@ class WorkflowConverter:
                     # Construct the new node ID
                     new_node_id = f"{node_id_str}:{internal_node}"
                     # Recursively resolve in case this is also a subgraph
-                    return resolve_subgraph_input(new_node_id, internal_slot)
+                    return resolve_subgraph_input(new_node_id, internal_slot, depth + 1)
             # Not a subgraph or not found in mappings, return as-is
             return (node_id_str, slot)
 

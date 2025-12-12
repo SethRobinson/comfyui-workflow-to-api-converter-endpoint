@@ -17,9 +17,7 @@ The result?  I no longer have to manually save two versions of my workflows to u
 
 ## Disclaimer
 
-How robust is this?  It handled all my workflows perfectly (even large 200 KB ones using Flux, Wan 2.2, etc) but your results may vary, no promises.  It has not been hardened or tested widely, so I don't recommend using this in any public-facing way.  
-
-For example, there is no protection against someone trying to upload a 10 GB file, I don't know what would happen.  So I recommend only using this privately (same computer or private LAN) and for non-mission-critical stuff.
+How robust is this?  It handled all my workflows perfectly (even large 200 KB ones using Flux, Wan 2.2, etc) but your results may vary, no promises.
 
 ## Features
 - Converts non-API workflows to the exact format produced by ComfyUI's "Save (API)" function
@@ -27,9 +25,12 @@ For example, there is no protection against someone trying to upload a 10 GB fil
 - Properly handles list and dictionary widget, subgraphs (including nested), etc
 - Preserves Unicode characters (Chinese, Japanese, emojis, etc.) correctly
 - Returns something that is ready to send to the `/prompt` endpoint, same as the original Javascript based web Export (API) option would've created
+- Hardening: Limits requests to max 1 MB workflow size, recursion depth limit is 100, no traceback exposure to clients
 
 
 ## Version History
+
+**V2.06** - Security hardening: added request size limit (1 MB), input validation, recursion depth limits, and removed traceback exposure to clients
 
 **V2.05** - Added marker node for ComfyUI Manager workflow dependency detection
 

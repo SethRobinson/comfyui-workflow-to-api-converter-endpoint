@@ -13,7 +13,10 @@ from .workflow_converter import WorkflowConverter
 logger = logging.getLogger(__name__)
 
 # Module version
-__version__ = "2.0.5"
+__version__ = "2.0.6"
+
+# Security settings
+MAX_CONTENT_LENGTH = 1 * 1024 * 1024  # 1 MB limit
 
 # Import ComfyUI's PromptServer to register our endpoint
 try:
@@ -32,6 +35,13 @@ async def convert_workflow_endpoint(request):
     Returns the converted API format workflow.
     """
     try:
+        # Check request size before parsing
+        content_length = request.content_length
+        if content_length is not None and content_length > MAX_CONTENT_LENGTH:
+            return web.json_response({
+                "error": f"Request too large. Maximum size is {MAX_CONTENT_LENGTH // (1024*1024)} MB"
+            }, status=413)
+        
         # Get the workflow from the request
         json_data = await request.json()
         
@@ -40,24 +50,35 @@ async def convert_workflow_endpoint(request):
             # Already in API format, return as-is with nice formatting
             return web.json_response(json_data, dumps=lambda x: json.dumps(x, ensure_ascii=False, indent=2))
         
-        # Convert to API format
-        if 'nodes' in json_data and 'links' in json_data:
-            num_nodes = len(json_data.get('nodes', []))
-            num_links = len(json_data.get('links', []))
-
-            api_format = WorkflowConverter.convert_to_api(json_data)
-
-            num_converted = len(api_format)
-            logger.info(f"[Workflow to API Converter v{__version__} by Seth A. Robinson] Converted workflow: {num_nodes} nodes, {num_links} links -> {num_converted} API nodes")
-
-            # Return just the converted API format with proper Unicode encoding
-            # This matches what "Save (API)" produces - just the nodes
-            # Format with nice indentation for readability
-            return web.json_response(api_format, dumps=lambda x: json.dumps(x, ensure_ascii=False, indent=2))
-        else:
+        # Validate workflow structure
+        if 'nodes' not in json_data or 'links' not in json_data:
             return web.json_response({
                 "error": "Invalid workflow format - missing nodes or links"
             }, status=400)
+        
+        if not isinstance(json_data.get('nodes'), list):
+            return web.json_response({
+                "error": "Invalid workflow format - 'nodes' must be a list"
+            }, status=400)
+        
+        if not isinstance(json_data.get('links'), list):
+            return web.json_response({
+                "error": "Invalid workflow format - 'links' must be a list"
+            }, status=400)
+        
+        # Convert to API format
+        num_nodes = len(json_data['nodes'])
+        num_links = len(json_data['links'])
+
+        api_format = WorkflowConverter.convert_to_api(json_data)
+
+        num_converted = len(api_format)
+        logger.info(f"[Workflow to API Converter v{__version__} by Seth A. Robinson] Converted workflow: {num_nodes} nodes, {num_links} links -> {num_converted} API nodes")
+
+        # Return just the converted API format with proper Unicode encoding
+        # This matches what "Save (API)" produces - just the nodes
+        # Format with nice indentation for readability
+        return web.json_response(api_format, dumps=lambda x: json.dumps(x, ensure_ascii=False, indent=2))
         
     except json.JSONDecodeError as e:
         logger.error(f"Invalid JSON in request: {e}")
@@ -68,13 +89,12 @@ async def convert_workflow_endpoint(request):
         
     except Exception as e:
         import traceback
-        error_msg = f"Error converting workflow: {str(e)}"
-        logger.error(error_msg)
+        # Log full traceback server-side only (don't expose to client)
+        logger.error(f"Error converting workflow: {str(e)}")
         logger.error(f"Traceback: {traceback.format_exc()}")
         return web.json_response({
             "success": False,
-            "error": str(e),
-            "details": traceback.format_exc()
+            "error": "Internal server error during conversion"
         }, status=500)
 
 # Also add a GET endpoint that provides information about the converter
