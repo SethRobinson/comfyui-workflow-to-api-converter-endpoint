@@ -42,17 +42,15 @@ How robust is this?  It handled all my workflows perfectly (even large 200 KB on
 
 ## Installation
 
-### Method 1: Git Clone (Recommended)
+### Method 1: Install via ComfyUI Manager (Recommended)
+
+Open ComfyUI Manager and click the "Custom Nodes Manager" button.  Search for "Workflow to API Converter Endpoint" and click "Install".
+
+### Method 2: Manual Git Clone
 ```bash
 cd ComfyUI/custom_nodes
 git clone https://github.com/SethRobinson/comfyui-workflow-to-api-converter-endpoint
 ```
-
-### Method 2: Manual Installation
-1. Download this repository as a ZIP file
-2. Extract the folder to `ComfyUI/custom_nodes/`
-3. Rename the folder to `comfyui-workflow-to-api-converter-endpoint` (remove any `-main` suffix)
-
 
 ### After Installation
 Restart ComfyUI and the `/workflow/convert` endpoint will be automatically available.
