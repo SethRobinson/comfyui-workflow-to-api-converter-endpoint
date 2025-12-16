@@ -84,6 +84,25 @@ class WorkflowConverter:
         internal_nodes = subgraph_def.get('nodes', [])
         internal_links = subgraph_def.get('links', [])
 
+        # Find the maximum link ID in the existing workflow links to avoid conflicts
+        # Subgraph internal links may reuse IDs that already exist in the workflow
+        max_link_id = 0
+        for link in workflow_links:
+            if isinstance(link, (list, tuple)) and len(link) > 0:
+                link_id = link[0]
+                if isinstance(link_id, int) and link_id > max_link_id:
+                    max_link_id = link_id
+
+        # Create a remapping for internal link IDs to avoid conflicts
+        link_id_remap = {}
+        next_link_id = max_link_id + 1
+        for link in internal_links:
+            if isinstance(link, dict):
+                old_id = link.get('id')
+                if old_id is not None:
+                    link_id_remap[old_id] = next_link_id
+                    next_link_id += 1
+
         # Build a mapping of internal link IDs to link data
         internal_link_map = {}
         for link in internal_links:
@@ -130,7 +149,7 @@ class WorkflowConverter:
             expanded_node['id'] = f"{subgraph_node_id}:{internal_id}"
 
             # Update the node's inputs to remove links from the inputNode (-10)
-            # These will be replaced by external connections
+            # and remap internal link IDs to avoid conflicts
             if 'inputs' in expanded_node:
                 updated_inputs = []
                 for input_info in expanded_node['inputs']:
@@ -145,8 +164,11 @@ class WorkflowConverter:
                             input_copy['link'] = None
                             updated_inputs.append(input_copy)
                         else:
-                            # Internal connection, keep as-is
-                            updated_inputs.append(input_info)
+                            # Internal connection - remap the link ID to avoid conflicts
+                            input_copy = input_info.copy()
+                            if input_link in link_id_remap:
+                                input_copy['link'] = link_id_remap[input_link]
+                            updated_inputs.append(input_copy)
                     else:
                         # No link or unknown link, keep as-is
                         updated_inputs.append(input_info)
@@ -165,9 +187,13 @@ class WorkflowConverter:
                 if origin_id in [-10, -20] or target_id in [-10, -20]:
                     continue
 
-                # Create new link with prefixed node IDs
+                # Get the remapped link ID to avoid conflicts with workflow links
+                old_link_id = link.get('id')
+                new_link_id = link_id_remap.get(old_link_id, old_link_id)
+
+                # Create new link with prefixed node IDs and remapped link ID
                 expanded_link = [
-                    link.get('id'),  # link_id - we'll need to ensure these don't conflict
+                    new_link_id,  # remapped link_id to avoid conflicts
                     f"{subgraph_node_id}:{origin_id}",  # source with prefix
                     link.get('origin_slot'),
                     f"{subgraph_node_id}:{target_id}",  # target with prefix

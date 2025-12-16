@@ -1,0 +1,8 @@
+# Cursor Rules for comfyui-workflow-to-api-converter-endpoint
+
+## Version Updates
+When updating the version for this project, update ALL THREE files:
+1. `__init__.py` - the `__version__` variable
+2. `pyproject.toml` - the `version` field
+3. `README.md` - add a version history entry in the "## Version History" section
+
