@@ -13,6 +13,8 @@ So this solution allows you to only work with "full workflows", you just have yo
 
 The result?  I no longer have to manually save two versions of my workflows to use with the API, just the "full".
 
+(Want an example?  My Unity-based [AI Tools project](https://github.com/SethRobinson/aitools_client) requires it.  It's a project that controls ComfyUI and LLM servers to do fun stuff)
+
 -Seth
 
 ## Disclaimer
