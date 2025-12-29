@@ -116,7 +116,7 @@ class WorkflowConverter:
         subgraph_inputs = subgraph_def.get('inputs', [])
         subgraph_outputs = subgraph_def.get('outputs', [])
 
-        input_slot_to_internal = {}  # slot_index -> (target_node_id, target_slot)
+        input_slot_to_internal = {}  # slot_index -> [(target_node_id, target_slot), (target_node_id_2, target_slot2), ...]
         internal_to_output_slot = {}  # (source_node_id, source_slot) -> slot_index
 
         # Map inputs from the inputNode (-10) to actual internal nodes
@@ -128,7 +128,9 @@ class WorkflowConverter:
                     link = internal_link_map[link_id]
                     target_id = link.get('target_id')
                     target_slot = link.get('target_slot')
-                    input_slot_to_internal[idx] = (target_id, target_slot)
+                    if idx not in input_slot_to_internal:
+                        input_slot_to_internal[idx] = []
+                    input_slot_to_internal[idx].append((target_id, target_slot))
 
         # Map outputs from internal nodes to the outputNode (-20)
         for idx, output_def in enumerate(subgraph_outputs):
@@ -255,7 +257,7 @@ class WorkflowConverter:
         # Expand subgraphs into individual nodes
         # We need to do this recursively to handle nested subgraphs
         # Keep expanding until no more subgraphs are found
-        subgraph_input_mappings = {}  # subgraph_node_id -> {slot_idx: (internal_node_id, internal_slot)}
+        subgraph_input_mappings = {}  # subgraph_node_id -> {slot_idx: [(internal_node_id, internal_slot), ...]}
         subgraph_output_mappings = {}  # subgraph_node_id -> {(internal_node_id, internal_slot): slot_idx}
 
         max_iterations = 10  # Prevent infinite loops
@@ -331,24 +333,26 @@ class WorkflowConverter:
         # Helper function to recursively resolve subgraph inputs
         def resolve_subgraph_input(node_id_str, slot, depth=0):
             """
-            Recursively resolve a subgraph input to the actual internal node.
-            Returns (resolved_node_id, resolved_slot)
+            Recursively resolve a subgraph input to the actual internal nodes.
+            Returns [(resolved_node_id, resolved_slot), ...]
             """
             # Prevent excessive recursion (security hardening)
             if depth > 100:
                 logger.warning(f"Max recursion depth reached resolving subgraph input for node {node_id_str}")
                 return (node_id_str, slot)
-            
+
             if node_id_str in subgraph_input_mappings:
                 input_map = subgraph_input_mappings[node_id_str]
                 if slot in input_map:
-                    internal_node, internal_slot = input_map[slot]
-                    # Construct the new node ID
-                    new_node_id = f"{node_id_str}:{internal_node}"
-                    # Recursively resolve in case this is also a subgraph
-                    return resolve_subgraph_input(new_node_id, internal_slot, depth + 1)
+                    result = []
+                    for internal_node, internal_slot in input_map[slot]:
+                        # Construct the new node ID
+                        new_node_id = f"{node_id_str}:{internal_node}"
+                        # Recursively resolve in case this is also a subgraph
+                        result += resolve_subgraph_input(new_node_id, internal_slot, depth + 1)
+                    return result
             # Not a subgraph or not found in mappings, return as-is
-            return (node_id_str, slot)
+            return [(node_id_str, slot)]
 
         # Update links to handle subgraph inputs and outputs
         # Also track which expanded node inputs need to be updated
@@ -370,19 +374,19 @@ class WorkflowConverter:
 
                 # Recursively resolve subgraph target
                 target_id_str = str(target_id)
-                resolved_target_id, resolved_target_slot = resolve_subgraph_input(target_id_str, target_slot)
+                resolved_targets = resolve_subgraph_input(target_id_str, target_slot)
+                for resolved_target_id, resolved_target_slot in resolved_targets:
 
-                # Track node input updates if target was remapped
-                if resolved_target_id != target_id_str:
-                    if resolved_target_id not in node_input_updates:
-                        node_input_updates[resolved_target_id] = {}
-                    node_input_updates[resolved_target_id][resolved_target_slot] = link_id
+                    # Track node input updates if target was remapped
+                    if resolved_target_id != target_id_str:
+                        if resolved_target_id not in node_input_updates:
+                            node_input_updates[resolved_target_id] = {}
+                        node_input_updates[resolved_target_id][resolved_target_slot] = link_id
 
-                target_id = resolved_target_id
-                target_slot = resolved_target_slot
+                    target_id = resolved_target_id
+                    target_slot = resolved_target_slot
 
-                updated_links.append([link_id, source_id, source_slot, target_id, target_slot, link_type])
-
+                    updated_links.append([link_id, source_id, source_slot, target_id, target_slot, link_type])
         # Replace links with updated version
         links = updated_links
 
