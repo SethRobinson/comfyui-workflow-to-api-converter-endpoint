@@ -431,16 +431,16 @@ class WorkflowConverter:
         # Also identify nodes that should be excluded from API format
         primitive_values = {}
         nodes_to_exclude = set()
-        bypassed_nodes = set()  # Track bypassed/disabled nodes
-        
+        bypassed_nodes = set()  # Track bypassed/disabled/reroute nodes
+
         for node in workflow_nodes:
             node_id = node.get('id')
             node_type = node.get('type')
             node_mode = node.get('mode', 0)
-            
-            # Track bypassed/disabled nodes
+
+            # Track bypassed/disabled or reroute nodes
             # Store as string to match link_data['source_id'] type
-            if node_mode == 4:
+            if node_mode == 4 or node_type == "Reroute":
                 bypassed_nodes.add(str(node_id))
                 logger.debug(f"Tracking bypassed node {node_id} ({node_type})")
             
@@ -553,7 +553,10 @@ class WorkflowConverter:
             elif node_mode == 4:  # Mode 4 is bypassed/disabled
                 logger.debug(f"Skipping bypassed/disabled node {node_id} ({node_type})")
                 continue
-            
+            elif node_type == 'Reroute':  # Mode 4 is a reroute node
+                logger.debug(f"Skipping reroute node {node_id} ({node_type})")
+                continue
+
             # Skip non-executable nodes
             # These include UI-only nodes and nodes with no connected outputs
             if node_type in ['Note', 'PrimitiveNode']:
