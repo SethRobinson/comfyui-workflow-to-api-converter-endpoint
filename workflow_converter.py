@@ -111,24 +111,28 @@ class WorkflowConverter:
                 internal_link_map[link_id] = link
 
         # Build input/output mappings for the subgraph
-        # Inputs: map input slot index to (internal_node_id, internal_slot)
+        # Inputs: map input slot index to list of (internal_node_id, internal_slot) tuples
+        # (one input may connect to multiple internal nodes)
         # Outputs: map (internal_node_id, internal_slot) to output slot index
         subgraph_inputs = subgraph_def.get('inputs', [])
         subgraph_outputs = subgraph_def.get('outputs', [])
 
-        input_slot_to_internal = {}  # slot_index -> (target_node_id, target_slot)
+        input_slot_to_internal = {}  # slot_index -> [(target_node_id, target_slot), ...]
         internal_to_output_slot = {}  # (source_node_id, source_slot) -> slot_index
 
         # Map inputs from the inputNode (-10) to actual internal nodes
         for idx, input_def in enumerate(subgraph_inputs):
             # Find links from inputNode to internal nodes
             input_link_ids = input_def.get('linkIds', [])
+            targets = []
             for link_id in input_link_ids:
                 if link_id in internal_link_map:
                     link = internal_link_map[link_id]
                     target_id = link.get('target_id')
                     target_slot = link.get('target_slot')
-                    input_slot_to_internal[idx] = (target_id, target_slot)
+                    targets.append((target_id, target_slot))
+            if targets:
+                input_slot_to_internal[idx] = targets
 
         # Map outputs from internal nodes to the outputNode (-20)
         for idx, output_def in enumerate(subgraph_outputs):
@@ -333,6 +337,8 @@ class WorkflowConverter:
             """
             Recursively resolve a subgraph input to the actual internal node.
             Returns (resolved_node_id, resolved_slot)
+            Note: When there are multiple targets, returns the first one.
+            Use resolve_subgraph_input_all for all targets.
             """
             # Prevent excessive recursion (security hardening)
             if depth > 100:
@@ -342,13 +348,38 @@ class WorkflowConverter:
             if node_id_str in subgraph_input_mappings:
                 input_map = subgraph_input_mappings[node_id_str]
                 if slot in input_map:
-                    internal_node, internal_slot = input_map[slot]
-                    # Construct the new node ID
-                    new_node_id = f"{node_id_str}:{internal_node}"
-                    # Recursively resolve in case this is also a subgraph
-                    return resolve_subgraph_input(new_node_id, internal_slot, depth + 1)
+                    targets = input_map[slot]
+                    if targets:
+                        internal_node, internal_slot = targets[0]
+                        # Construct the new node ID
+                        new_node_id = f"{node_id_str}:{internal_node}"
+                        # Recursively resolve in case this is also a subgraph
+                        return resolve_subgraph_input(new_node_id, internal_slot, depth + 1)
             # Not a subgraph or not found in mappings, return as-is
             return (node_id_str, slot)
+        
+        # Helper function to get ALL internal targets for a subgraph input
+        def resolve_subgraph_input_all(node_id_str, slot, depth=0):
+            """
+            Recursively resolve a subgraph input to ALL actual internal nodes.
+            Returns list of (resolved_node_id, resolved_slot) tuples.
+            """
+            if depth > 100:
+                logger.warning(f"Max recursion depth reached resolving subgraph input for node {node_id_str}")
+                return [(node_id_str, slot)]
+            
+            if node_id_str in subgraph_input_mappings:
+                input_map = subgraph_input_mappings[node_id_str]
+                if slot in input_map:
+                    targets = input_map[slot]
+                    results = []
+                    for internal_node, internal_slot in targets:
+                        new_node_id = f"{node_id_str}:{internal_node}"
+                        # Recursively resolve in case this is also a subgraph
+                        results.extend(resolve_subgraph_input_all(new_node_id, internal_slot, depth + 1))
+                    return results if results else [(node_id_str, slot)]
+            # Not a subgraph or not found in mappings, return as-is
+            return [(node_id_str, slot)]
 
         # Update links to handle subgraph inputs and outputs
         # Also track which expanded node inputs need to be updated
@@ -368,16 +399,19 @@ class WorkflowConverter:
                 source_id_str = str(source_id)
                 source_id, source_slot = resolve_subgraph_output(source_id_str, source_slot)
 
-                # Recursively resolve subgraph target
+                # Recursively resolve subgraph target(s) - one input may go to multiple internal nodes
                 target_id_str = str(target_id)
-                resolved_target_id, resolved_target_slot = resolve_subgraph_input(target_id_str, target_slot)
-
-                # Track node input updates if target was remapped
-                if resolved_target_id != target_id_str:
-                    if resolved_target_id not in node_input_updates:
-                        node_input_updates[resolved_target_id] = {}
-                    node_input_updates[resolved_target_id][resolved_target_slot] = link_id
-
+                all_targets = resolve_subgraph_input_all(target_id_str, target_slot)
+                
+                # Track node input updates for ALL targets that were remapped
+                for resolved_target_id, resolved_target_slot in all_targets:
+                    if resolved_target_id != target_id_str:
+                        if resolved_target_id not in node_input_updates:
+                            node_input_updates[resolved_target_id] = {}
+                        node_input_updates[resolved_target_id][resolved_target_slot] = link_id
+                
+                # Use the first target for the updated link
+                resolved_target_id, resolved_target_slot = all_targets[0]
                 target_id = resolved_target_id
                 target_slot = resolved_target_slot
 
@@ -423,11 +457,22 @@ class WorkflowConverter:
                 # Track that this source node has connected outputs
                 nodes_with_connected_outputs.add(source_id)
         
-        # First pass: identify PrimitiveNodes and their values
+        # First pass: identify PrimitiveNodes, GetNode/SetNode pairs, and their values
         # Also identify nodes that should be excluded from API format
         primitive_values = {}
         nodes_to_exclude = set()
         bypassed_nodes = set()  # Track bypassed/disabled nodes
+        
+        # Track GetNode/SetNode variable mappings
+        # SetNode: variable_name -> (source_node_id, source_slot) from its input link
+        # GetNode: node_id -> variable_name
+        set_node_sources = {}  # variable_name -> (source_node_id, source_slot)
+        get_node_vars = {}  # node_id (str) -> variable_name
+        
+        # First, build the node lookup map for quick access
+        node_by_id = {}
+        for node in workflow_nodes:
+            node_by_id[str(node.get('id'))] = node
         
         for node in workflow_nodes:
             node_id = node.get('id')
@@ -446,6 +491,30 @@ class WorkflowConverter:
                 widget_values = node.get('widgets_values')
                 if widget_values and len(widget_values) > 0:
                     primitive_values[node_id_str] = widget_values[0]
+            
+            # Track SetNode: maps variable name to its input source
+            elif node_type == 'SetNode':
+                widget_values = node.get('widgets_values')
+                if widget_values and len(widget_values) > 0:
+                    var_name = widget_values[0]
+                    # Find the input link to this SetNode
+                    node_inputs = node.get('inputs', [])
+                    if node_inputs:
+                        for input_info in node_inputs:
+                            input_link = input_info.get('link')
+                            if input_link is not None and input_link in link_map:
+                                link_data = link_map[input_link]
+                                set_node_sources[var_name] = (link_data['source_id'], link_data['source_slot'])
+                                logger.debug(f"SetNode '{var_name}' receives from node {link_data['source_id']} slot {link_data['source_slot']}")
+                                break
+            
+            # Track GetNode: maps node_id to variable name
+            elif node_type == 'GetNode':
+                widget_values = node.get('widgets_values')
+                if widget_values and len(widget_values) > 0:
+                    var_name = widget_values[0]
+                    get_node_vars[str(node_id)] = var_name
+                    logger.debug(f"GetNode {node_id} provides variable '{var_name}'")
             
             # Check if this node should be excluded from API format
             # Exclude nodes that have no connected outputs (UI-only nodes)
@@ -476,6 +545,38 @@ class WorkflowConverter:
                 else:
                     logger.debug(f"Keeping node {node_id} ({node_type}) - OUTPUT_NODE=True despite no connected outputs")
         
+        # Helper function to trace through GetNode/SetNode pairs
+        def trace_through_get_set_nodes(source_node_id, source_slot, visited=None):
+            """
+            Trace through GetNode/SetNode pairs to find the actual source.
+            GetNode outputs the value that was set by a corresponding SetNode.
+            Returns (actual_source_id, actual_source_slot) tuple.
+            """
+            if visited is None:
+                visited = set()
+            
+            source_node_id_str = str(source_node_id)
+            
+            # Avoid infinite loops
+            if source_node_id_str in visited:
+                return (source_node_id, source_slot)
+            visited.add(source_node_id_str)
+            
+            # Check if source is a GetNode
+            if source_node_id_str in get_node_vars:
+                var_name = get_node_vars[source_node_id_str]
+                # Find the SetNode that provides this variable
+                if var_name in set_node_sources:
+                    actual_source_id, actual_source_slot = set_node_sources[var_name]
+                    logger.debug(f"Tracing GetNode {source_node_id} (var '{var_name}') -> actual source {actual_source_id} slot {actual_source_slot}")
+                    # Recursively trace in case the SetNode's source is also a GetNode
+                    return trace_through_get_set_nodes(actual_source_id, actual_source_slot, visited)
+                else:
+                    logger.warning(f"GetNode {source_node_id} references variable '{var_name}' but no SetNode found for it")
+            
+            # Not a GetNode or couldn't trace, return as-is
+            return (source_node_id, source_slot)
+        
         # Helper function to trace through bypassed nodes
         def trace_through_bypassed(source_node_id, source_slot, visited=None):
             """
@@ -504,26 +605,52 @@ class WorkflowConverter:
                     node_type = node.get('type', 'unknown')
                     # Look for the input that should be passed through
                     node_inputs = node.get('inputs', [])
+                    node_outputs = node.get('outputs', [])
+                    
+                    # Get the output type at source_slot to match with the right input
+                    output_type = None
+                    if node_outputs and source_slot < len(node_outputs):
+                        output_type = node_outputs[source_slot].get('type')
 
                     if node_inputs:
-                        # Pass through ANY linked input, not just image/latent
-                        # This is critical for kjnodes (WidgetToString) which use widget inputs
-                        # Try to find a linked input (any type)
+                        # When bypassed, the node passes through input -> output
+                        # Try to find an input that matches the output type
                         linked_input = None
+                        fallback_linked_input = None
+                        
                         for idx, input_info in enumerate(node_inputs):
                             input_link = input_info.get('link')
-                            input_name = input_info.get('name', f'input_{idx}')
+                            input_type = input_info.get('type')
 
                             if input_link is not None and input_link in link_map:
-                                linked_input = input_link
-                                break
+                                # Keep track of first linked input as fallback
+                                if fallback_linked_input is None:
+                                    fallback_linked_input = input_link
+                                
+                                # Prefer input that matches output type
+                                if output_type and input_type == output_type:
+                                    linked_input = input_link
+                                    break
+                        
+                        # Use matched input if found, otherwise fallback to first linked input
+                        if linked_input is None:
+                            linked_input = fallback_linked_input
 
                         if linked_input is not None:
                             link_data = link_map[linked_input]
-                            # Recursively trace through this source
+                            upstream_source_id = link_data['source_id']
+                            upstream_source_slot = link_data['source_slot']
+                            
+                            # First trace through GetNode/SetNode pairs
+                            upstream_source_id, upstream_source_slot = trace_through_get_set_nodes(
+                                upstream_source_id,
+                                upstream_source_slot
+                            )
+                            
+                            # Recursively trace through this source (for more bypassed nodes)
                             return trace_through_bypassed(
-                                link_data['source_id'],
-                                link_data['source_slot'],
+                                upstream_source_id,
+                                upstream_source_slot,
                                 visited
                             )
                     break
@@ -551,8 +678,8 @@ class WorkflowConverter:
                 continue
             
             # Skip non-executable nodes
-            # These include UI-only nodes and nodes with no connected outputs
-            if node_type in ['Note', 'PrimitiveNode']:
+            # These include UI-only nodes, routing nodes, and nodes with no connected outputs
+            if node_type in ['Note', 'PrimitiveNode', 'GetNode', 'SetNode']:
                 logger.debug(f"Skipping {node_type} node {node_id}")
                 continue
             
@@ -594,23 +721,40 @@ class WorkflowConverter:
                         source_node_id = link_data['source_id']
                         source_slot = link_data['source_slot']
 
+                        # First, trace through GetNode/SetNode pairs to find actual source
+                        # This is needed because GetNode/SetNode are routing nodes that aren't in the API output
+                        actual_source_id, actual_source_slot = trace_through_get_set_nodes(
+                            source_node_id,
+                            source_slot
+                        )
+                        
                         # If source is bypassed, try to trace through to find the actual upstream source
                         # This handles passthrough nodes (e.g., ModelSamplingAuraFlow) where bypassing
                         # should just pass the input through to the output
-                        if source_node_id in bypassed_nodes:
+                        if str(actual_source_id) in bypassed_nodes:
                             actual_source_id, actual_source_slot = trace_through_bypassed(
-                                source_node_id,
-                                source_slot
+                                actual_source_id,
+                                actual_source_slot
                             )
                             # If we couldn't find a valid upstream source (still bypassed or no linked input),
                             # skip this connection and let the target node fall back to widget values
                             if str(actual_source_id) in bypassed_nodes:
                                 logger.debug(f"Could not trace through bypassed node {source_node_id} for input {input_name}, falling back to widget value")
                                 continue
-                        else:
-                            # Source is not bypassed, use as-is
-                            actual_source_id = source_node_id
-                            actual_source_slot = source_slot
+                        
+                        # After tracing through bypassed nodes, also trace through any GetNode/SetNode pairs again
+                        # (in case the bypassed node's source was a GetNode)
+                        actual_source_id, actual_source_slot = trace_through_get_set_nodes(
+                            actual_source_id,
+                            actual_source_slot
+                        )
+                        
+                        # Resolve subgraph outputs - if the source is a subgraph node, find the actual internal node
+                        # This is needed because GetNode/SetNode might point to a subgraph's output
+                        actual_source_id, actual_source_slot = resolve_subgraph_output(
+                            str(actual_source_id),
+                            actual_source_slot
+                        )
                         
                         source_node_id_str = str(actual_source_id)
                         

@@ -32,6 +32,8 @@ How robust is this?  It handled all my workflows perfectly (even large 200 KB on
 
 ## Version History
 
+**V2.08** - Fixed GetNode/SetNode routing issue that I had with a very complex workflow with lots of subgraphs and FastGroupBypassers that results in a failed conversion
+
 **V2.07** - Fixed subgraph internal link IDs conflicting with workflow link IDs, causing missing input connections in rare cases
 
 **V2.06** - Security hardening: added request size limit (1 MB), input validation, recursion depth limits, and removed traceback exposure to clients
