@@ -259,8 +259,10 @@ class WorkflowConverter:
         # Expand subgraphs into individual nodes
         # We need to do this recursively to handle nested subgraphs
         # Keep expanding until no more subgraphs are found
-        subgraph_input_mappings = {}  # subgraph_node_id -> {slot_idx: (internal_node_id, internal_slot)}
+        subgraph_input_mappings = {}  # subgraph_node_id -> {subgraph_input_idx: [(internal_node_id, internal_slot), ...]}
         subgraph_output_mappings = {}  # subgraph_node_id -> {(internal_node_id, internal_slot): slot_idx}
+        # Maps outer node input slot to subgraph definition input index (by name matching)
+        subgraph_slot_to_input_idx = {}  # subgraph_node_id -> {outer_slot: subgraph_input_idx}
 
         max_iterations = 10  # Prevent infinite loops
         iteration = 0
@@ -294,6 +296,29 @@ class WorkflowConverter:
                     # Use string representation of node_id for consistency
                     subgraph_input_mappings[str(node_id)] = input_map
                     subgraph_output_mappings[str(node_id)] = output_map
+                    
+                    # Build mapping from outer node input slots to subgraph input indices
+                    # The outer node's inputs may have different slot positions than the subgraph definition
+                    # We match by input name to find the correct subgraph input index
+                    outer_inputs = node.get('inputs', [])
+                    subgraph_inputs = subgraph_def.get('inputs', [])
+                    
+                    # Build name -> subgraph_input_idx map
+                    subgraph_input_name_to_idx = {}
+                    for idx, sg_input in enumerate(subgraph_inputs):
+                        input_name = sg_input.get('name')
+                        if input_name:
+                            subgraph_input_name_to_idx[input_name] = idx
+                    
+                    # Map outer slots to subgraph input indices
+                    slot_mapping = {}
+                    for outer_slot, outer_input in enumerate(outer_inputs):
+                        outer_name = outer_input.get('name')
+                        if outer_name and outer_name in subgraph_input_name_to_idx:
+                            slot_mapping[outer_slot] = subgraph_input_name_to_idx[outer_name]
+                            logger.debug(f"Subgraph {node_id}: outer slot {outer_slot} ('{outer_name}') -> subgraph input idx {subgraph_input_name_to_idx[outer_name]}")
+                    
+                    subgraph_slot_to_input_idx[str(node_id)] = slot_mapping
                 else:
                     # Regular node, keep as-is
                     expanded_nodes.append(node)
@@ -347,8 +372,16 @@ class WorkflowConverter:
             
             if node_id_str in subgraph_input_mappings:
                 input_map = subgraph_input_mappings[node_id_str]
-                if slot in input_map:
-                    targets = input_map[slot]
+                
+                # Convert outer slot to subgraph input index using the slot mapping
+                subgraph_input_idx = slot
+                if node_id_str in subgraph_slot_to_input_idx:
+                    slot_mapping = subgraph_slot_to_input_idx[node_id_str]
+                    if slot in slot_mapping:
+                        subgraph_input_idx = slot_mapping[slot]
+                
+                if subgraph_input_idx in input_map:
+                    targets = input_map[subgraph_input_idx]
                     if targets:
                         internal_node, internal_slot = targets[0]
                         # Construct the new node ID
@@ -370,8 +403,16 @@ class WorkflowConverter:
             
             if node_id_str in subgraph_input_mappings:
                 input_map = subgraph_input_mappings[node_id_str]
-                if slot in input_map:
-                    targets = input_map[slot]
+                
+                # Convert outer slot to subgraph input index using the slot mapping
+                subgraph_input_idx = slot
+                if node_id_str in subgraph_slot_to_input_idx:
+                    slot_mapping = subgraph_slot_to_input_idx[node_id_str]
+                    if slot in slot_mapping:
+                        subgraph_input_idx = slot_mapping[slot]
+                
+                if subgraph_input_idx in input_map:
+                    targets = input_map[subgraph_input_idx]
                     results = []
                     for internal_node, internal_slot in targets:
                         new_node_id = f"{node_id_str}:{internal_node}"
@@ -539,11 +580,21 @@ class WorkflowConverter:
                 node_class = nodes.NODE_CLASS_MAPPINGS.get(node_type) if hasattr(nodes, 'NODE_CLASS_MAPPINGS') else None
                 is_output_node = node_class and hasattr(node_class, 'OUTPUT_NODE') and node_class.OUTPUT_NODE
                 
-                if not is_output_node:
+                # Fallback: if node class isn't available but node has connected inputs,
+                # it's likely an output node (e.g., SaveVideo, SaveImage) that should be kept
+                has_connected_input = False
+                if not is_output_node and not node_class:
+                    node_inputs = node.get('inputs', [])
+                    for input_info in node_inputs:
+                        if input_info.get('link') is not None:
+                            has_connected_input = True
+                            break
+                
+                if not is_output_node and not has_connected_input:
                     nodes_to_exclude.add(str(node_id))
                     logger.debug(f"Marking node {node_id} ({node_type}) for exclusion - no connected outputs")
                 else:
-                    logger.debug(f"Keeping node {node_id} ({node_type}) - OUTPUT_NODE=True despite no connected outputs")
+                    logger.debug(f"Keeping node {node_id} ({node_type}) - OUTPUT_NODE=True or has connected inputs despite no connected outputs")
         
         # Helper function to trace through GetNode/SetNode pairs
         def trace_through_get_set_nodes(source_node_id, source_slot, visited=None):
@@ -982,6 +1033,43 @@ class WorkflowConverter:
         return []
     
     @staticmethod
+    def _get_dynamic_combo_sub_inputs(input_name: str, input_spec: Any, widget_values: List[Any], current_idx: int) -> List[str]:
+        """
+        Get sub-input names for a COMFY_DYNAMICCOMBO_V3 input based on the selected option.
+        Returns list of sub-input names with dot notation (e.g., ['resize_type.width', 'resize_type.height']).
+        """
+        if not isinstance(input_spec, (list, tuple)) or len(input_spec) < 2:
+            return []
+        
+        input_type = input_spec[0]
+        if not isinstance(input_type, str) or not input_type.startswith('COMFY_') or 'COMBO' not in input_type:
+            return []
+        
+        spec_options = input_spec[1] if len(input_spec) > 1 else {}
+        if not isinstance(spec_options, dict):
+            return []
+        
+        options = spec_options.get('options', [])
+        if not options or current_idx >= len(widget_values):
+            return []
+        
+        # Get the selected option value
+        selected_value = widget_values[current_idx]
+        
+        # Find the matching option and its sub-inputs
+        for option in options:
+            if isinstance(option, dict) and option.get('key') == selected_value:
+                sub_inputs = option.get('inputs', {})
+                sub_input_names = []
+                for section in ['required', 'optional']:
+                    if section in sub_inputs:
+                        for sub_name in sub_inputs[section].keys():
+                            sub_input_names.append(f"{input_name}.{sub_name}")
+                return sub_input_names
+        
+        return []
+    
+    @staticmethod
     def _get_widget_mappings(node_type: str, node: Dict[str, Any]) -> List[Optional[str]]:
         """
         Get widget name mappings for a given node type.
@@ -995,12 +1083,18 @@ class WorkflowConverter:
             # Sometimes the actual node class name is stored here
             node_type = properties['Node name for S&R']
         
+        widget_values = node.get('widgets_values', [])
+        if isinstance(widget_values, dict):
+            # Dict format - keys are widget names
+            widget_values = []  # Can't use for index-based sub-input lookup
+        
         # Try to get from cached node info first
         node_info = get_node_info_for_type(node_type)
         if node_info and 'input' in node_info:
             try:
                 input_def = node_info['input']
                 widget_names = []
+                widget_idx = 0
 
                 # Process required inputs first, then optional
                 for section in ['required', 'optional']:
@@ -1009,17 +1103,36 @@ class WorkflowConverter:
                             # Check if this is a widget input (not a node connection)
                             if isinstance(input_spec, (list, tuple)) and len(input_spec) >= 1:
                                 input_type = input_spec[0]
+                                is_widget = False
+                                is_dynamic_combo = False
+                                
                                 # Check if it's a widget type
                                 if isinstance(input_type, list):
                                     # This is a combo box widget (list of choices)
-                                    widget_names.append(input_name)
+                                    is_widget = True
                                 elif input_type in ['INT', 'FLOAT', 'STRING', 'BOOLEAN', 'COMBO']:
                                     # Basic widget types (COMBO is also a widget type, not a connection)
-                                    widget_names.append(input_name)
+                                    is_widget = True
+                                elif isinstance(input_type, str) and input_type.startswith('COMFY_') and 'COMBO' in input_type:
+                                    # ComfyUI V3 dynamic combo types (e.g., COMFY_DYNAMICCOMBO_V3)
+                                    is_widget = True
+                                    is_dynamic_combo = True
                                 elif isinstance(input_type, str) and not input_type.isupper():
                                     # Custom widget types (lowercase)
+                                    is_widget = True
+                                
+                                if is_widget:
                                     widget_names.append(input_name)
-                                # Skip connection types (MODEL, LATENT, CONDITIONING, etc.)
+                                    
+                                    # Handle dynamic combo sub-inputs
+                                    if is_dynamic_combo and widget_values:
+                                        sub_inputs = WorkflowConverter._get_dynamic_combo_sub_inputs(
+                                            input_name, input_spec, widget_values, widget_idx
+                                        )
+                                        widget_names.extend(sub_inputs)
+                                        widget_idx += 1 + len(sub_inputs)
+                                    else:
+                                        widget_idx += 1
 
                 if widget_names:
                     return widget_names
@@ -1034,6 +1147,7 @@ class WorkflowConverter:
 
                 # Build ordered list of widget names (non-connection inputs)
                 widget_names = []
+                widget_idx = 0
 
                 # Process required inputs first, then optional
                 for section in ['required', 'optional']:
@@ -1042,17 +1156,36 @@ class WorkflowConverter:
                             # Check if this is a widget input (not a node connection)
                             if isinstance(input_spec, tuple) and len(input_spec) >= 1:
                                 input_type = input_spec[0]
+                                is_widget = False
+                                is_dynamic_combo = False
+                                
                                 # Check if it's a widget type
                                 if isinstance(input_type, list):
                                     # This is a combo box widget (list of choices)
-                                    widget_names.append(input_name)
+                                    is_widget = True
                                 elif input_type in ['INT', 'FLOAT', 'STRING', 'BOOLEAN', 'COMBO']:
                                     # Basic widget types (COMBO is also a widget type, not a connection)
-                                    widget_names.append(input_name)
+                                    is_widget = True
+                                elif isinstance(input_type, str) and input_type.startswith('COMFY_') and 'COMBO' in input_type:
+                                    # ComfyUI V3 dynamic combo types (e.g., COMFY_DYNAMICCOMBO_V3)
+                                    is_widget = True
+                                    is_dynamic_combo = True
                                 elif isinstance(input_type, str) and not input_type.isupper():
                                     # Custom widget types (lowercase)
+                                    is_widget = True
+                                
+                                if is_widget:
                                     widget_names.append(input_name)
-                                # Skip connection types (MODEL, LATENT, CONDITIONING, etc.)
+                                    
+                                    # Handle dynamic combo sub-inputs
+                                    if is_dynamic_combo and widget_values:
+                                        sub_inputs = WorkflowConverter._get_dynamic_combo_sub_inputs(
+                                            input_name, input_spec, widget_values, widget_idx
+                                        )
+                                        widget_names.extend(sub_inputs)
+                                        widget_idx += 1 + len(sub_inputs)
+                                    else:
+                                        widget_idx += 1
 
                 if widget_names:
                     return widget_names
