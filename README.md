@@ -32,6 +32,8 @@ How robust is this?  It handled all my workflows perfectly (even large 200 KB on
 
 ## Version History
 
+**V2.1.0** - Fixed missing default values for required inputs (e.g., `device` field in LTXAVTextEncoderLoader). The converter now includes default values from node INPUT_TYPES() for inputs not explicitly set in the workflow, matching the official "Save (API)" output.
+
 **V2.09** - Fixed subgraph input slot mapping (inputs at different positions in outer node vs subgraph definition), fixed output node exclusion when node class unavailable, added support for COMFY_DYNAMICCOMBO_V3 widgets with dynamic sub-inputs (e.g., ResizeImageMaskNode)
 
 **V2.08** - Fixed GetNode/SetNode routing issue that I had with a very complex workflow with lots of subgraphs and FastGroupBypassers that results in a failed conversion

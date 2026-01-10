@@ -876,17 +876,23 @@ class WorkflowConverter:
                             if filtered_values:
                                 logger.warning(f"Could not map widget values for unknown node type '{node_type}' (node {node_id})")
             
+            # Get default values for inputs that aren't set via widgets or links
+            # This is important for required inputs with defaults that aren't in widget_values
+            default_inputs = WorkflowConverter._get_default_inputs(node_type, widget_inputs, primitive_inputs, link_inputs)
+            
             # Build inputs in the correct order
             # The official "Save (API)" format follows this pattern:
             # ALL widget values first (in node class order), then ALL link inputs (in node class order)
             # Note: Resolved primitive values are treated as widgets for ordering
             if ordered_inputs:
-                # First pass: add all widget values in order (including resolved primitives)
+                # First pass: add all widget values in order (including resolved primitives and defaults)
                 for input_name in ordered_inputs:
                     if input_name in widget_inputs:
                         api_node['inputs'][input_name] = widget_inputs[input_name]
                     elif input_name in primitive_inputs:
                         api_node['inputs'][input_name] = primitive_inputs[input_name]
+                    elif input_name in default_inputs:
+                        api_node['inputs'][input_name] = default_inputs[input_name]
                 
                 # Second pass: add all link inputs in order
                 for input_name in ordered_inputs:
@@ -900,15 +906,21 @@ class WorkflowConverter:
                 for key, value in primitive_inputs.items():
                     if key not in api_node['inputs']:
                         api_node['inputs'][key] = value
+                for key, value in default_inputs.items():
+                    if key not in api_node['inputs']:
+                        api_node['inputs'][key] = value
                 for key, value in link_inputs.items():
                     if key not in api_node['inputs']:
                         api_node['inputs'][key] = value
             else:
                 # Fallback when we don't have the node class: add all inputs in order they appear
-                # First add ALL widget inputs and primitives, then ALL link inputs
+                # First add ALL widget inputs, primitives, and defaults, then ALL link inputs
                 for key, value in widget_inputs.items():
                     api_node['inputs'][key] = value
                 for key, value in primitive_inputs.items():
+                    if key not in api_node['inputs']:
+                        api_node['inputs'][key] = value
+                for key, value in default_inputs.items():
                     if key not in api_node['inputs']:
                         api_node['inputs'][key] = value
                 for key, value in link_inputs.items():
@@ -1244,3 +1256,65 @@ class WorkflowConverter:
 
         # If we still can't determine mappings, return empty
         return []
+    
+    @staticmethod
+    def _get_default_inputs(node_type: str, widget_inputs: Dict[str, Any], primitive_inputs: Dict[str, Any], link_inputs: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Get default values for required/optional inputs that aren't already set.
+        
+        This is important for nodes where required inputs have default values defined
+        in the node class, but the workflow doesn't explicitly set them (using defaults).
+        The official "Save (API)" format includes these default values.
+        
+        Args:
+            node_type: The node class type
+            widget_inputs: Already processed widget inputs
+            primitive_inputs: Already processed primitive inputs  
+            link_inputs: Already processed link inputs
+            
+        Returns:
+            Dict of input names to their default values for inputs that aren't already set
+        """
+        default_inputs = {}
+        
+        # Get the node class to access INPUT_TYPES
+        if not hasattr(nodes, 'NODE_CLASS_MAPPINGS') or node_type not in nodes.NODE_CLASS_MAPPINGS:
+            return default_inputs
+        
+        try:
+            node_class = nodes.NODE_CLASS_MAPPINGS[node_type]
+            input_types = node_class.INPUT_TYPES()
+            
+            # Check both required and optional inputs
+            for section in ['required', 'optional']:
+                if section not in input_types:
+                    continue
+                    
+                for input_name, input_spec in input_types[section].items():
+                    # Skip if already set
+                    if input_name in widget_inputs or input_name in primitive_inputs or input_name in link_inputs:
+                        continue
+                    
+                    # Check if this input has a default value
+                    if isinstance(input_spec, (list, tuple)) and len(input_spec) >= 1:
+                        input_type = input_spec[0]
+                        spec_options = input_spec[1] if len(input_spec) >= 2 else {}
+                        
+                        # Check for explicit default in options dict
+                        if isinstance(spec_options, dict) and 'default' in spec_options:
+                            default_inputs[input_name] = spec_options['default']
+                            logger.debug(f"Adding default value for {node_type}.{input_name}: {spec_options['default']}")
+                        # For combo boxes (list type), use first item as implicit default
+                        elif isinstance(input_type, list) and len(input_type) > 0:
+                            default_inputs[input_name] = input_type[0]
+                            logger.debug(f"Adding implicit combo default for {node_type}.{input_name}: {input_type[0]}")
+                        # For COMBO type with options dict, use first option as implicit default
+                        elif input_type == 'COMBO' and isinstance(spec_options, dict) and 'options' in spec_options:
+                            options = spec_options['options']
+                            if isinstance(options, list) and len(options) > 0:
+                                default_inputs[input_name] = options[0]
+                                logger.debug(f"Adding implicit COMBO default for {node_type}.{input_name}: {options[0]}")
+        except Exception as e:
+            logger.debug(f"Could not get default inputs for {node_type}: {e}")
+        
+        return default_inputs

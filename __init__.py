@@ -13,7 +13,7 @@ from .workflow_converter import WorkflowConverter
 logger = logging.getLogger(__name__)
 
 # Module version
-__version__ = "2.0.9"
+__version__ = "2.1.0"
 
 # Security settings
 MAX_CONTENT_LENGTH = 1 * 1024 * 1024  # 1 MB limit
