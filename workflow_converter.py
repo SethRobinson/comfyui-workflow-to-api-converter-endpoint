@@ -866,7 +866,7 @@ class WorkflowConverter:
                             if isinstance(input_spec, (list, tuple)) and len(input_spec) >= 1:
                                 input_type = input_spec[0]
                                 # Check if it's a widget type
-                                if isinstance(input_type, list):
+                                if isinstance(input_type, list) or isinstance(input_type, tuple):
                                     # This is a combo box widget (list of choices)
                                     widget_names.append(input_name)
                                 elif input_type in ['INT', 'FLOAT', 'STRING', 'BOOLEAN', 'COMBO']:
