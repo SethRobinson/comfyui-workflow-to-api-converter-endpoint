@@ -1119,7 +1119,7 @@ class WorkflowConverter:
                                 is_dynamic_combo = False
                                 
                                 # Check if it's a widget type
-                                if isinstance(input_type, list):
+                                if isinstance(input_type, list) or isinstance(input_type, tuple):
                                     # This is a combo box widget (list of choices)
                                     is_widget = True
                                 elif input_type in ['INT', 'FLOAT', 'STRING', 'BOOLEAN', 'COMBO']:
