@@ -509,6 +509,7 @@ class WorkflowConverter:
         # GetNode: node_id -> variable_name
         set_node_sources = {}  # variable_name -> (source_node_id, source_slot)
         get_node_vars = {}  # node_id (str) -> variable_name
+        reroute_sources = {}  # node_id_str -> (source_node_id, source_slot)
         
         # First, build the node lookup map for quick access
         node_by_id = {}
@@ -556,6 +557,16 @@ class WorkflowConverter:
                     var_name = widget_values[0]
                     get_node_vars[str(node_id)] = var_name
                     logger.debug(f"GetNode {node_id} provides variable '{var_name}'")
+            
+            # Track Reroute: maps node_id to its input source
+            elif node_type == 'Reroute':
+                node_inputs = node.get('inputs', [])
+                if node_inputs:
+                    input_link = node_inputs[0].get('link')
+                    if input_link is not None and input_link in link_map:
+                        link_data = link_map[input_link]
+                        reroute_sources[str(node_id)] = (link_data['source_id'], link_data['source_slot'])
+                        logger.debug(f"Reroute {node_id} passes through from node {link_data['source_id']} slot {link_data['source_slot']}")
             
             # Check if this node should be excluded from API format
             # Exclude nodes that have no connected outputs (UI-only nodes)
@@ -698,6 +709,12 @@ class WorkflowConverter:
                                 upstream_source_slot
                             )
                             
+                            # Trace through Reroute nodes
+                            upstream_source_id, upstream_source_slot = trace_through_reroute(
+                                upstream_source_id,
+                                upstream_source_slot
+                            )
+                            
                             # Recursively trace through this source (for more bypassed nodes)
                             return trace_through_bypassed(
                                 upstream_source_id,
@@ -707,6 +724,29 @@ class WorkflowConverter:
                     break
             
             # If we couldn't trace further, return original
+            return (source_node_id, source_slot)
+        
+        # Helper function to trace through Reroute nodes
+        def trace_through_reroute(source_node_id, source_slot, visited=None):
+            """
+            Trace through Reroute nodes to find the actual source.
+            Reroute nodes are UI-only pass-through routing nodes.
+            Returns (actual_source_id, actual_source_slot) tuple.
+            """
+            if visited is None:
+                visited = set()
+            
+            source_node_id_str = str(source_node_id)
+            
+            if source_node_id_str in visited:
+                return (source_node_id, source_slot)
+            visited.add(source_node_id_str)
+            
+            if source_node_id_str in reroute_sources:
+                actual_source_id, actual_source_slot = reroute_sources[source_node_id_str]
+                logger.debug(f"Tracing Reroute {source_node_id} -> actual source {actual_source_id} slot {actual_source_slot}")
+                return trace_through_reroute(actual_source_id, actual_source_slot, visited)
+            
             return (source_node_id, source_slot)
         
         # Build API format prompt
@@ -730,7 +770,7 @@ class WorkflowConverter:
             
             # Skip non-executable nodes
             # These include UI-only nodes, routing nodes, and nodes with no connected outputs
-            if node_type in ['Note', 'PrimitiveNode', 'GetNode', 'SetNode']:
+            if node_type in ['Note', 'PrimitiveNode', 'GetNode', 'SetNode', 'Reroute']:
                 logger.debug(f"Skipping {node_type} node {node_id}")
                 continue
             
@@ -779,6 +819,12 @@ class WorkflowConverter:
                             source_slot
                         )
                         
+                        # Trace through Reroute nodes (UI-only pass-through routing)
+                        actual_source_id, actual_source_slot = trace_through_reroute(
+                            actual_source_id,
+                            actual_source_slot
+                        )
+                        
                         # If source is bypassed, try to trace through to find the actual upstream source
                         # This handles passthrough nodes (e.g., ModelSamplingAuraFlow) where bypassing
                         # should just pass the input through to the output
@@ -796,6 +842,12 @@ class WorkflowConverter:
                         # After tracing through bypassed nodes, also trace through any GetNode/SetNode pairs again
                         # (in case the bypassed node's source was a GetNode)
                         actual_source_id, actual_source_slot = trace_through_get_set_nodes(
+                            actual_source_id,
+                            actual_source_slot
+                        )
+                        
+                        # Trace through Reroute nodes again (in case bypassed trace led to a Reroute)
+                        actual_source_id, actual_source_slot = trace_through_reroute(
                             actual_source_id,
                             actual_source_slot
                         )
@@ -1119,8 +1171,8 @@ class WorkflowConverter:
                                 is_dynamic_combo = False
                                 
                                 # Check if it's a widget type
-                                if isinstance(input_type, list):
-                                    # This is a combo box widget (list of choices)
+                                if isinstance(input_type, (list, tuple)):
+                                    # This is a combo box widget (list/tuple of choices)
                                     is_widget = True
                                 elif input_type in ['INT', 'FLOAT', 'STRING', 'BOOLEAN', 'COMBO']:
                                     # Basic widget types (COMBO is also a widget type, not a connection)
@@ -1172,8 +1224,8 @@ class WorkflowConverter:
                                 is_dynamic_combo = False
                                 
                                 # Check if it's a widget type
-                                if isinstance(input_type, list):
-                                    # This is a combo box widget (list of choices)
+                                if isinstance(input_type, (list, tuple)):
+                                    # This is a combo box widget (list/tuple of choices)
                                     is_widget = True
                                 elif input_type in ['INT', 'FLOAT', 'STRING', 'BOOLEAN', 'COMBO']:
                                     # Basic widget types (COMBO is also a widget type, not a connection)
