@@ -979,6 +979,9 @@ class WorkflowConverter:
                     if key not in api_node['inputs']:
                         api_node['inputs'][key] = value
             
+            # Normalize combo widget values against the node's allowed options
+            WorkflowConverter._normalize_combo_values(node_type, api_node['inputs'])
+
             api_prompt[node_id] = api_node
         
         return api_prompt
@@ -1370,3 +1373,49 @@ class WorkflowConverter:
             logger.debug(f"Could not get default inputs for {node_type}: {e}")
         
         return default_inputs
+
+    @staticmethod
+    def _normalize_combo_values(node_type: str, inputs: Dict[str, Any]) -> None:
+        """
+        Normalize combo widget values against the node's allowed options.
+        
+        Some workflows store values with different capitalization than what the
+        node class declares (e.g. "True" vs "true"). ComfyUI's validator does a
+        strict string match, so this corrects mismatches via case-insensitive fallback.
+        """
+        if not hasattr(nodes, 'NODE_CLASS_MAPPINGS') or node_type not in nodes.NODE_CLASS_MAPPINGS:
+            return
+
+        try:
+            node_class = nodes.NODE_CLASS_MAPPINGS[node_type]
+            input_types = node_class.INPUT_TYPES()
+        except Exception:
+            return
+
+        for section in ['required', 'optional']:
+            if section not in input_types:
+                continue
+
+            for input_name, input_spec in input_types[section].items():
+                if input_name not in inputs:
+                    continue
+
+                value = inputs[input_name]
+                if not isinstance(value, str):
+                    continue
+
+                if not isinstance(input_spec, (list, tuple)) or len(input_spec) < 1:
+                    continue
+
+                allowed = input_spec[0]
+                if not isinstance(allowed, (list, tuple)):
+                    continue
+
+                if value in allowed:
+                    continue
+
+                for option in allowed:
+                    if isinstance(option, str) and value.lower() == option.lower():
+                        logger.info(f"Normalized combo value for {node_type}.{input_name}: '{value}' -> '{option}'")
+                        inputs[input_name] = option
+                        break

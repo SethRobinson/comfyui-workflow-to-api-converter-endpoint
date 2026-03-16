@@ -32,6 +32,8 @@ How robust is this?  It handled all my workflows perfectly (even large 200 KB on
 
 ## Version History
 
+**V2.3.0** - Fixed combo widget values with wrong capitalization being rejected by ComfyUI's validator (e.g. "True" vs "true"). Combo values are now normalized against the node's allowed options via case-insensitive matching. (thanks to ha7v for reporting issue #13)
+
 **V2.2.0** - Now properly ignoring the new 'reroute' nodes, fixed issue with tuples 
 
 **V2.1.0** - Fixed missing default values for required inputs (e.g., `device` field in LTXAVTextEncoderLoader). The converter now includes default values from node INPUT_TYPES() for inputs not explicitly set in the workflow, matching the official "Save (API)" output.
