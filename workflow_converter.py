@@ -982,6 +982,14 @@ class WorkflowConverter:
             # Normalize combo widget values against the node's allowed options
             WorkflowConverter._normalize_combo_values(node_type, api_node['inputs'])
 
+            # ComfyUI reads a bare list input as a [node_id, slot] link. List-valued
+            # widget values must be wrapped as {"__value__": [...]}, exactly as the
+            # ComfyUI frontend does when it builds the API prompt; the backend unwraps
+            # them before validation. Links are the only lists left bare.
+            for input_name, value in api_node['inputs'].items():
+                if isinstance(value, list) and link_inputs.get(input_name) is not value:
+                    api_node['inputs'][input_name] = {"__value__": value}
+
             api_prompt[node_id] = api_node
         
         return api_prompt
