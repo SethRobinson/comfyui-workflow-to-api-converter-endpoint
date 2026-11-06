@@ -115,6 +115,56 @@ curl -s -X POST "http://localhost:8188/workflow/convert" \
   --data-binary @workflow.json > api_workflow.json
 ```
 
+## File cleanup endpoints
+
+`POST /files/delete` and `GET /files/list` are additions in this repository, on
+top of the workflow converter. ComfyUI core has no way to remove a file over HTTP,
+so a client that fetched its result through `/view` leaves that copy on the server
+forever: core's only DELETE route is `/userdata/{file}`, and
+`DELETE /api/assets/{id}` removes the database row while the file on disk stays.
+
+The code lives in `file_endpoints.py` and is registered from `__init__.py`; the
+converter itself is untouched, so syncing with the original
+SethRobinson/comfyui-workflow-to-api-converter-endpoint stays conflict-free and
+the version in `pyproject.toml` still tracks it.
+
+### POST /files/delete
+
+```json
+{"files": [{"filename": "qwen21_20261106_120000_1234_00001_.png", "subfolder": "", "type": "output"}]}
+```
+
+`filename`/`subfolder` are exactly what ComfyUI reports in the job history (or in
+the `/upload/image` response, for `type: "input"`). Up to 64 files per request.
+
+```json
+{"ok": true, "deleted": ["output/a.png"], "absent": ["output/already-gone.png"], "skipped": []}
+```
+
+A file that is already gone counts as `absent`, so retrying after a lost response
+is harmless. `ok` is false only when `skipped` is not empty, and each entry there
+carries the reason.
+
+Only regular files inside ComfyUI's own `output/`, `input/` or `temp/` can be
+removed: absolute paths, drive letters, UNC paths, `~` and `..` are refused, and
+so is anything whose resolved path ends up outside that directory - a junction or
+symlink inside `output/` cannot be used to reach elsewhere. Nothing is globbed,
+recursive or shell-based: one unlink per exact filename.
+
+### GET /files/list
+
+`?type=output|input|temp`, plus optional `prefix=` (matched against the path
+relative to the base dir), `older_than_min=`, `limit=` (default 200, max 2000)
+and `all=1` to lift the limit. Newest first:
+
+```json
+{"type": "output", "directory": "D:\\ComfyUI\\ComfyUI\\output", "total": 1, "truncated": false,
+ "files": [{"filename": "a.png", "subfolder": "", "type": "output", "bytes": 1048576, "modified": 1762430000}]}
+```
+
+Like the rest of a default ComfyUI install, neither endpoint is authenticated -
+keep the server on a trusted network, as you already would for `/prompt`.
+
 ## Credits
 
 **Created by Seth A. Robinson**

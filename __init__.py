@@ -25,6 +25,15 @@ except ImportError as e:
     logger.error("Could not import PromptServer. Make sure this is installed in ComfyUI's custom_nodes directory.")
     raise e
 
+# File cleanup endpoints (/files/delete, /files/list), added in this repo and kept
+# in their own module so syncing with the original converter stays conflict-free.
+try:
+    from .file_endpoints import register_file_endpoints
+    register_file_endpoints(PromptServer.instance.routes)
+except Exception as e:
+    # Losing the cleanup endpoints must never take /workflow/convert down with them.
+    logger.error(f"[File endpoints] Not registered: {e}")
+
 # Register the API endpoint when the custom node is loaded
 @PromptServer.instance.routes.post('/workflow/convert')
 async def convert_workflow_endpoint(request):
