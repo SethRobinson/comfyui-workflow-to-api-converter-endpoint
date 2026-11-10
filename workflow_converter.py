@@ -152,6 +152,20 @@ class WorkflowConverter:
             # Prefix the node ID with the subgraph node ID
             expanded_node['id'] = f"{subgraph_node_id}:{internal_id}"
 
+            # Update outputs[].links to reflect internal subgraph links
+            # This is needed because the original node's outputs[].links is empty
+            # in subgraph definitions - actual links are stored separately
+            if 'outputs' in expanded_node:
+                for output_idx, output in enumerate(expanded_node['outputs']):
+                    # Find all links that originate from this output slot
+                    matching_links = []
+                    for link in internal_links:
+                        if isinstance(link, dict) and link.get('origin_id') == internal_id and link.get('origin_slot') == output_idx:
+                            new_link_id = link_id_remap.get(link.get('id'), link.get('id'))
+                            matching_links.append(new_link_id)
+                    if matching_links:
+                        output['links'] = matching_links
+
             # Update the node's inputs to remove links from the inputNode (-10)
             # and remap internal link IDs to avoid conflicts
             if 'inputs' in expanded_node:
